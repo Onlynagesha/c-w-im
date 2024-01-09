@@ -1,0 +1,65 @@
+cmake_minimum_required(VERSION 3.20)
+project(C_w_IM)
+
+set(CMAKE_CXX_STANDARD 23)
+
+find_package(argparse CONFIG REQUIRED)
+find_package(Boost REQUIRED) # Boost.assert
+find_package(fmt CONFIG REQUIRED)
+find_package(magic_enum CONFIG REQUIRED)
+find_package(nameof CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
+find_package(TBB CONFIG REQUIRED) # Dependency of NWGraph library
+
+set(THIRD_PARTY_INCLUDE_DIRS 
+    third_party/nwgraph/include
+    third_party/reflect_cpp/include
+    third_party/yalantinglibs/include)
+set(THIRD_PARTY_SOURCE_FILES 
+    third_party/reflect_cpp/src/yyjson.c)
+
+# Enables customized Boost.assert fail handler (see utils/boost_assert.h for details)
+set(COMMON_COMPILE_DEFINITIONS
+    BOOST_ENABLE_ASSERT_DEBUG_HANDLER)
+# Enables assertion for GCC libstdc++
+if (CMAKE_BUILD_TYPE AND (CMAKE_BUILD_TYPE STREQUAL "Debug"))
+    list(APPEND COMMON_COMPILE_DEFINITIONS _GLIBCXX_ASSERTIONS)
+endif ()
+
+set(COMMON_INCLUDE_DIRS
+    ${Boost_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${THIRD_PARTY_INCLUDE_DIRS})
+
+set(COMMON_SOURCE_FILES
+    ${THIRD_PARTY_SOURCE_FILES}
+    argparse.cpp
+    dump.cpp
+    graph_types.cpp
+    )
+
+set(COMMON_LINK_LIBRARIES
+    argparse::argparse
+    fmt::fmt
+    magic_enum::magic_enum
+    nameof::nameof
+    nlohmann_json::nlohmann_json
+    TBB::tbb
+    TBB::tbbmalloc)
+list(APPEND COMMON_LINK_LIBRARIES stdc++exp) # C++23 std::stacktrace supported since GCC 14.0
+
+add_executable(wim
+    main_wim.cpp
+    wim.cpp
+    ${COMMON_SOURCE_FILES})
+
+add_executable(create-dataset
+    main_create_dataset.cpp
+    create_dataset.cpp
+    ${COMMON_SOURCE_FILES})
+
+foreach(target wim create-dataset)
+    target_compile_definitions(${target} PRIVATE ${COMMON_COMPILE_DEFINITIONS})
+    target_include_directories(${target} PRIVATE ${COMMON_INCLUDE_DIRS})
+target_link_libraries(${target} PRIVATE ${COMMON_LINK_LIBRARIES})
+endforeach()

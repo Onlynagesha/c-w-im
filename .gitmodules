@@ -1,0 +1,9 @@
+[submodule "third_party/nwgraph"]
+	path = third_party/nwgraph
+	url = https://github.com/Onlynagesha/NWGraph
+[submodule "third_party/reflect_cpp"]
+	path = third_party/reflect_cpp
+	url = https://github.com/Onlynagesha/reflect-cpp
+[submodule "third_party/yalantinglibs"]
+	path = third_party/yalantinglibs
+	url = https://github.com/alibaba/yalantinglibs
