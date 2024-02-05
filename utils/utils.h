@@ -7,6 +7,7 @@
 #include <numeric>
 #include <random>
 #include <ranges>
+#include <utility>
 
 #define LAMBDA_0(...) [&]() { return (__VA_ARGS__); }
 #define LAMBDA_1(...) [&](auto&& _1) { return (__VA_ARGS__); }
@@ -26,6 +27,25 @@ namespace views = std::views;
 using nlohmann::json;
 
 using ssize_t = std::make_signed_t<size_t>;
+
+// Alternative of std::forward_like: https://en.cppreference.com/w/cpp/utility/forward_like
+template <class T, class U>
+[[nodiscard]] constexpr auto&& forward_like(U&& x) noexcept {
+  constexpr bool is_adding_const = std::is_const_v<std::remove_reference_t<T>>;
+  if constexpr (std::is_lvalue_reference_v<T&&>) {
+    if constexpr (is_adding_const) {
+      return std::as_const(x);
+    } else {
+      return static_cast<U&>(x);
+    }
+  } else {
+    if constexpr (is_adding_const) {
+      return std::move(std::as_const(x));
+    } else {
+      return std::move(x);
+    }
+  }
+}
 
 template <class T>
 constexpr auto is_std_vector_v = false;
@@ -82,9 +102,14 @@ template <class T, ranges::input_range Range>
   requires(std::is_convertible_v<ranges::range_value_t<Range>, T>)
 inline auto accumulate_sum(Range&& range, T init = T{}) -> T {
   for (auto&& elem : range) {
-    init = init + std::forward_like<Range>(elem);
+    init = init + forward_like<Range>(elem);
   }
   return init;
+}
+
+template <ranges::input_range Range>
+inline auto accumulate_sum(Range&& range) -> ranges::range_value_t<Range> {
+  return accumulate_sum(std::forward<Range>(range), ranges::range_value_t<Range>{});
 }
 
 template <class T>
@@ -95,15 +120,15 @@ inline auto make_reserved_vector(size_t capacity) {
 }
 
 namespace details {
-template <class TupleType, class Func, size_t... Indices>
-inline auto tuple_transform_impl(TupleType&& tuple, Func&& func, std::index_sequence<Indices...>) {
-  return std::tuple{std::invoke(func, std::get<Indices>(tuple))...};
+template <class Func, class TupleType, size_t... Indices>
+inline auto tuple_transform_impl(std::index_sequence<Indices...>, Func&& func, TupleType&& tuple) {
+  return std::tuple{std::invoke(func, get<Indices>(std::forward<TupleType>(tuple)))...};
 }
 } // namespace details
 
-template <class TupleType, class Func>
-inline auto tuple_transform(TupleType&& tuple, Func&& func) {
+template <class Func, class TupleType>
+inline auto tuple_transform(Func&& func, TupleType&& tuple) {
   constexpr auto N = std::tuple_size_v<std::remove_cvref_t<TupleType>>;
-  return details::tuple_transform_impl(std::forward<TupleType>(tuple), std::forward<Func>(func),
-                                       std::make_index_sequence<N>{});
+  return details::tuple_transform_impl(std::make_index_sequence<N>{}, std::forward<Func>(func),
+                                       std::forward<TupleType>(tuple));
 }

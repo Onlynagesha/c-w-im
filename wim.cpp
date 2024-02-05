@@ -1,4 +1,5 @@
 #include "wim.h"
+#include "utils/histogram.h"
 #include "utils/result.h"
 #include <fmt/ranges.h>
 #include <nlohmann/json.hpp>
@@ -69,7 +70,7 @@ auto wim_simulate_generic(const AdjacencyList<E>& graph, const VertexSet& seeds,
   }
   // Result = Total vertex weight of seeds + Average of total BFS-traversed vertex weight excluding seeds
   auto seed_sum = accumulate_sum(seeds.vertex_list | vid_to_weight, 0.0);
-  ELOGFMT(DEBUG, "Total weight of seed vertices = {}, with seeds = {}", seed_sum, seeds.vertex_list);
+  ELOGFMT(DEBUG, "Total weight of seed vertices = {}, with # of seeds = {}", seed_sum, seeds.vertex_list.size());
   return accumulate_sum(seeds.vertex_list | vid_to_weight, 0.0) + (sum / try_count);
 }
 } // namespace
@@ -129,7 +130,10 @@ auto RRSketchSet::append(size_t n_sketches) noexcept -> void {
 auto RRSketchSet::select(vertex_id_t k) noexcept -> std::vector<vertex_id_t> {
   k = std::min(k, num_vertices());
   // Uses negative count to mark the vertices that are already selected
-  auto cover_count = inv_sketches | views::transform(ranges::ssize) | ranges::to<std::vector>();
+  auto cover_count = [&] {
+    auto view = inv_sketches | views::transform(ranges::ssize);
+    return std::vector(view.begin(), view.end());
+  }();
   auto covered = DynamicBitset{num_sketches()};
   auto res = std::vector<vertex_id_t>{};
   res.reserve(k);
@@ -237,18 +241,29 @@ auto wim_experiment(const AdjacencyListPair<WIMEdge>& graph, const WIMParams& pa
     timer.start();
     rr_sketches.append(r_new);
     timer.stop();
-    ELOGFMT(INFO, "Done appending new {} RR-sketches. Time used = {:.3} sec.", r_new, timer.elapsed());
+    auto avg_sketch_size = rr_sketches.average_sketch_size();
+    ELOGFMT(INFO, "Done appending new {} RR-sketches. Average RR-sketche size = {:.3f}; Time used = {:.3f} sec.", r_new,
+            avg_sketch_size, timer.elapsed());
+    ELOGFMT(DEBUG, "{:.2f}% of RR-sketches contains 1 vertex only.", rr_sketches.ratio_of_single_vertex_sketch());
+    ELOGFMT(DEBUG, "Histogram of RR-sketch sizes:\n{}",
+            make_histogram(rr_sketches.sketch_sizes(), params.histogram_width, params.histogram_height));
 
     json_root["time_used"]["rr_sketch"].push_back({{r_key, timer.elapsed()}});
-    json_root["experiments"].push_back({{"r", r}});
+    json_root["experiments"].push_back({{"r", r}, {"average_sketch_size", avg_sketch_size}});
     auto& json_exp = json_root["experiments"].back();
 
     auto max_n_seeds = params.num_seeds.back();
     timer.start();
     auto seed_list = rr_sketches.select(max_n_seeds);
     timer.stop();
-    ELOGFMT(INFO, "Done selecting {} seeds. Time used = {:.3} sec.", max_n_seeds, timer.elapsed());
-    ELOGFMT(DEBUG, "Seeds selected: {}", seed_list);
+    ELOGFMT(INFO, "Done selecting {} seeds. Time used = {:.3f} sec.", max_n_seeds, timer.elapsed());
+    ELOG_DEBUG << [&] {
+      auto res = fmt::format("Seeds selected (with average degree = {:.3f}):", 1.0 * m / n);
+      for (auto s : seed_list) {
+        res += fmt::format("\n\tid = {}, degree = {}", s, graph.degree(s));
+      }
+      return res;
+    }();
 
     json_root["time_used"]["select_seeds"].push_back({{r_key, timer.elapsed()}});
     json_exp["seeds_selected"] = seed_list;
@@ -261,10 +276,8 @@ auto wim_experiment(const AdjacencyListPair<WIMEdge>& graph, const WIMParams& pa
       wim_simulate_w(adj_list, vertex_weights, seed_set, try_count)
           .and_then([&](double sim_res) -> ResultVoid {
             timer.stop();
-
-            ELOGFMT(DEBUG, "The first {} seeds: {}", s, seed_set.vertex_list);
             constexpr auto msg_pattern_2 =
-                "Done simulation with the first {} seeds. Result = {:.6f}. Time used = {:.3} sec.";
+                "Done simulation with the first {} seeds. Result = {:.3f}. Time used = {:.3f} sec.";
             ELOGFMT(INFO, msg_pattern_2, s, sim_res, timer.elapsed());
 
             json_root["time_used"]["simulate"][r_key].push_back({{s_key, timer.elapsed()}});

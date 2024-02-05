@@ -1,70 +1,50 @@
 #include <chrono>
+#include <expected>
 #include <fmt/color.h>
-#include <fmt/format.h>
 #include <iostream>
 #include <rfl/Result.hpp>
-#include <stacktrace>
-#include <thread>
-
-void simulate_time_consuming(int seconds) {
-  constexpr auto msg_pattern = "Simulating very time-consuming operation: sleeps for {} sec.\n";
-  std::cout << fmt::format(fg(fmt::color::orange_red), msg_pattern, seconds);
-  if (seconds > 0) {
-    std::this_thread::sleep_for(std::chrono::seconds{seconds});
-  }
-}
 
 struct VeryLarge {
-  static inline int default_ctor_count = 0;
-  static inline int copy_ctor_count = 0;
-  static inline int move_ctor_count = 0;
+  static inline auto default_ctor_count = 0;
 
-  VeryLarge() {
-    default_ctor_count += 1;
-
-    auto st = to_string(std::stacktrace::current(1));
-    std::cout << fmt::format("Default constructor: VeryLarge()\nStacktrace:\n{}", st);
+  VeryLarge() : value(std::to_string(default_ctor_count++)) {
+    std::cout << "Default constructor: VeryLarge()\n";
+  }
+  VeryLarge(VeryLarge&& other) noexcept : value(std::move(other.value)) {
+    std::cout << fmt::format(fg(fmt::color::yellow), "Move constructor: VeryLarge(VeryLarge&&)\n");
+    other.value = "(Moved away)";
+  }
+  VeryLarge(const VeryLarge& other) : value(other.value) {
+    std::cout << fmt::format(fg(fmt::color::orange), "Copy constructor: VeryLarge(const VeryLarge&)\n");
   }
 
-  VeryLarge(const VeryLarge&) {
-    copy_ctor_count += 1;
-
-    constexpr auto msg_pattern = "Copy constructor: VeryLarge(const VeryLarge&)\nStacktrace:\n{}";
-    auto st = to_string(std::stacktrace::current(1));
-    std::cout << fmt::format(fg(fmt::color::yellow), msg_pattern, st);
-    simulate_time_consuming(3);
-  }
-
-  VeryLarge(VeryLarge&& src) noexcept {
-    move_ctor_count += 1;
-
-    constexpr auto msg_pattern = "Move constructor: VeryLarge(VeryLarge&&)\nStacktrace:\n{}";
-    auto st = to_string(std::stacktrace::current(1));
-    std::cout << fmt::format(fg(fmt::color::light_green), msg_pattern, st);
-  }
+  std::string value;
 };
 
+template <class T>
+using ResultType = rfl::Result<T>;
+// using ResultType = std::expected<T, rfl::Error>;
+
+auto some_func() -> ResultType<VeryLarge> {
+  return VeryLarge{};
+}
+
 int main() {
-  auto result1 = rfl::Result<VeryLarge>{VeryLarge{}};
-  result1.and_then([](VeryLarge&) -> rfl::Result<int> {
-    std::cout << fmt::format("result1.and_then(), with result1 as non-const left-reference.\n");
-    return 0;
+  auto foo = some_func();
+  std::cout << fmt::format("Before foo.and_then(): foo.value = {:?}\n", (*foo).value);
+  // Here we attempt to modify the contents inside foo via a left-reference.
+  foo.and_then([](VeryLarge& obj) -> ResultType<rfl::Nothing> {
+    obj.value += "-modified"; // Modification here
+    std::cout << fmt::format("foo.and_then(): obj.value: {:?}\n", obj.value);
+    return rfl::Nothing{};
   });
+  // We expect that the modification above is represented here.
+  std::cout << fmt::format("After foo.and_then(): foo.value: {:?}\n", (*foo).value);
 
-  const auto result2 = rfl::Result<VeryLarge>{VeryLarge{}};
-  result2.and_then([](const VeryLarge&) -> rfl::Result<int> {
-    std::cout << fmt::format("result2.and_then(), with result2 as const left-reference.\n");
-    return 0;
-  });
-
-  std::move(result1).and_then([](VeryLarge) -> rfl::Result<int> {
-    std::cout << fmt::format("move(result1).and_then(), with result1 as non-const right-reference.\n");
-    return 0;
-  });
-
-  std::move(result2).and_then([](const VeryLarge&) -> rfl::Result<int> {
-    std::cout << fmt::format("move(result2).and_then(), with result2 as const right-reference.\n");
-    return 0;
+  // Still, for right-values, copy constructor shall not be triggered.
+  some_func().and_then([](VeryLarge obj) -> ResultType<rfl::Nothing> {
+    std::cout << fmt::format("some_func().and_then(): obj.value: {:?}\n", obj.value);
+    return rfl::Nothing{};
   });
 
   return 0;

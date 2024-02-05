@@ -15,6 +15,20 @@ struct AdjacencyListPair {
   AdjacencyList<E> adj_list;
   InvAdjacencyList<E> inv_adj_list;
   std::vector<vertex_weight_t> vertex_weights;
+
+  auto in_degree(vertex_id_t v) const {
+    BOOST_ASSERT_MSG(v >= 0 && v < graph::num_vertices(inv_adj_list), "v is out of range [0, n).");
+    return graph::degree(inv_adj_list, v);
+  }
+
+  auto out_degree(vertex_id_t v) const {
+    BOOST_ASSERT_MSG(v >= 0 && v < graph::num_vertices(inv_adj_list), "v is out of range [0, n).");
+    return graph::degree(adj_list, v);
+  }
+
+  auto degree(vertex_id_t v) const {
+    return in_degree(v) + out_degree(v);
+  }
 };
 
 struct WIMParams {
@@ -25,8 +39,11 @@ struct WIMParams {
 
   std::string log_output_file;
   std::string json_output_file;
+
   easylog::Severity log_severity = easylog::Severity::DEBUG;
   bool log_console = false;
+  size_t histogram_width = 100;
+  size_t histogram_height = 20;
 
   static auto parse_from_args(int argc, char** argv) noexcept -> rfl::Result<WIMParams>;
 };
@@ -86,6 +103,20 @@ struct RRSketchSet {
 
   auto num_sketches() const -> size_t {
     return sketches.size();
+  }
+
+  auto sketch_sizes() const {
+    return sketches | views::transform(ranges::size);
+  }
+
+  auto average_sketch_size() const -> double {
+    BOOST_ASSERT_MSG(!sketches.empty(), "Requires at least 1 RR-sketch to exist on calculating average size.");
+    return 1.0 * accumulate_sum(sketch_sizes()) / sketches.size();
+  }
+
+  auto ratio_of_single_vertex_sketch() const -> double {
+    BOOST_ASSERT_MSG(!sketches.empty(), "Requires at least 1 RR-sketch to exist on calculating average size.");
+    return 1.0 * ranges::count(sketch_sizes(), 1) / sketches.size();
   }
 
   // Appends r new RR-sketches

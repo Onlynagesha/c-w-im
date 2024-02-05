@@ -20,7 +20,9 @@ set(THIRD_PARTY_SOURCE_FILES
 
 # Enables customized Boost.assert fail handler (see utils/boost_assert.h for details)
 set(COMMON_COMPILE_DEFINITIONS
-    BOOST_ENABLE_ASSERT_DEBUG_HANDLER)
+    BOOST_ENABLE_ASSERT_DEBUG_HANDLER
+    BOOST_STACKTRACE_LINK
+    BOOST_STACKTRACE_USE_BACKTRACE)
 # Enables assertion for GCC libstdc++
 if (CMAKE_BUILD_TYPE AND (CMAKE_BUILD_TYPE STREQUAL "Debug"))
     list(APPEND COMMON_COMPILE_DEFINITIONS _GLIBCXX_ASSERTIONS)
@@ -37,7 +39,6 @@ set(COMMON_SOURCE_FILES
     dump.cpp
     graph_types.cpp
     )
-
 set(COMMON_LINK_LIBRARIES
     argparse::argparse
     fmt::fmt
@@ -46,7 +47,6 @@ set(COMMON_LINK_LIBRARIES
     nlohmann_json::nlohmann_json
     TBB::tbb
     TBB::tbbmalloc)
-list(APPEND COMMON_LINK_LIBRARIES stdc++exp) # C++23 std::stacktrace supported since GCC 14.0
 
 add_executable(wim
     main_wim.cpp
@@ -58,7 +58,12 @@ add_executable(create-dataset
     create_dataset.cpp
     ${COMMON_SOURCE_FILES})
 
-foreach(target wim create-dataset)
+add_executable(to-matrix-market
+    main_to_matrix_market.cpp
+    to_matrix_market.cpp
+    ${COMMON_SOURCE_FILES})
+
+foreach(target wim create-dataset to-matrix-market)
     target_compile_definitions(${target} PRIVATE ${COMMON_COMPILE_DEFINITIONS})
     target_include_directories(${target} PRIVATE ${COMMON_INCLUDE_DIRS})
 target_link_libraries(${target} PRIVATE ${COMMON_LINK_LIBRARIES})

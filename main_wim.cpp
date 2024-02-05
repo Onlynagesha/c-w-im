@@ -55,13 +55,14 @@ auto main_worker(int argc, char** argv) -> ResultVoid try {
 RFL_RESULT_CATCH_HANDLER()
 
 int main(int argc, char** argv) {
-  return *main_worker(argc, argv)
-              .and_then([](auto) {
-                ELOG_INFO << "WIM experiment done.";
-                return rfl::Result<int>{0};
-              })
-              .or_else([](const rfl::Error& error) {
-                ELOGFMT(CRITICAL, "WIM experiment error: `{}'", error.what());
-                return rfl::Result<int>{-1};
-              });
+  return main_worker(argc, argv)
+      .and_then([](auto) {
+        ELOG_INFO << "WIM experiment done.";
+        return rfl::Result{0};
+      })
+      .or_else([](const rfl::Error& error) {
+        ELOGFMT(CRITICAL, "WIM experiment error: `{}'", error.what());
+        return rfl::Result{-1};
+      })
+      .value_or(-1);
 }

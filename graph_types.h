@@ -6,6 +6,7 @@
 #include <compare>
 #include <concepts>
 #include <rfl/Result.hpp>
+#include <rfl/always_false.hpp>
 
 using vertex_weight_t = float;
 using edge_probability_t = float;
@@ -61,6 +62,17 @@ auto read_directed_wim_edge_list(const std::string& input_file) noexcept -> rfl:
 
 auto read_directed_wbim_edge_list(const std::string& input_file) noexcept -> rfl::Result<WBIMReadGraphResult>;
 
+template <is_edge_property E>
+inline auto read_directed_edge_list(const std::string& input_file) {
+  if constexpr (std::is_same_v<E, WIMEdge>) {
+    return read_directed_wim_edge_list(input_file);
+  } else if constexpr (std::is_same_v<E, WBIMEdge>) {
+    return read_directed_wbim_edge_list(input_file);
+  } else {
+    static_assert(rfl::always_false_v<E>, "Invalid edge type.");
+  }
+}
+
 auto write_directed_wim_edge_list(const DirectedEdgeList<WIMEdge>& graph,
                                   std::span<const vertex_weight_t> vertex_weights,
                                   const std::string& output_file) noexcept -> ResultVoid;
@@ -69,10 +81,27 @@ auto write_directed_wbim_edge_list(const DirectedEdgeList<WBIMEdge>& graph,
                                    std::span<const vertex_weight_t> vertex_weights,
                                    const std::string& output_file) noexcept -> ResultVoid;
 
+template <is_edge_property E>
+inline auto write_directed_edge_list(const DirectedEdgeList<E>& graph, std::span<const vertex_weight_t> vertex_weights,
+                                     const std::string& output_file) {
+  if constexpr (std::is_same_v<E, WIMEdge>) {
+    return write_directed_wim_edge_list(graph, vertex_weights, output_file);
+  } else if constexpr (std::is_same_v<E, WBIMEdge>) {
+    return write_directed_wbim_edge_list(graph, vertex_weights, output_file);
+  } else {
+    static_assert(rfl::always_false_v<E>, "Invalid edge type.");
+  }
+}
+
 inline auto write_directed_wim_edge_list_r(const WIMReadGraphResult& graph, const std::string& output_file) {
   return write_directed_wim_edge_list(graph.edge_list, graph.vertex_weights, output_file);
 }
 
 inline auto write_directed_wbim_edge_list_r(const WBIMReadGraphResult& graph, const std::string& output_file) {
   return write_directed_wbim_edge_list(graph.edge_list, graph.vertex_weights, output_file);
+}
+
+template <is_edge_property E>
+inline auto write_directed_edge_list_r(const ReadGraphResult<E>& graph, const std::string& output_file) {
+  return write_directed_edge_list_generic(graph.edge_list, graph.vertex_weights, output_file);
 }

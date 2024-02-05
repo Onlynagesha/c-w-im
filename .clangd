@@ -1,2 +1,5 @@
 Diagnostics:
   UnusedIncludes: None
+  Suppress: 
+    - 'builtin_definition'
+    - 'template_different_type_constraint'

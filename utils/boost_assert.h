@@ -1,18 +1,16 @@
 #pragma once
 
 #include <boost/assert.hpp>
+#include <execinfo.h>
 #include <fmt/format.h>
-#include <stacktrace>
 
 namespace details {
 inline void dump_assert_fail(char const* expr, char const* msg, char const* function, char const* file, long line) {
   constexpr auto msg_pattern = "Assertion failed: {0}"
                                "\n\tDescription: {1}"
                                "\n\tSource location: {2}:{3}"
-                               "\n\tAt function: {4}"
-                               "\n\tStacktrace:\n{5}";
-  auto st = std::stacktrace::current(2); // 2 : Skips dump_assert_fail and assertion_failed[_msg]
-  fmt::print(stderr, msg_pattern, expr, msg, file, line, function, to_string(st));
+                               "\n\tAt function: {4}";
+  fmt::print(stderr, msg_pattern, expr, msg, file, line, function);
 }
 } // namespace details
 
