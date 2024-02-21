@@ -27,9 +27,9 @@ auto get_p_values_generic(const ReadGraphParams& params, double in_deg, double o
   auto clamp_fn = [&](auto p) { return std::clamp(p, *params.mu_min, *params.mu_max); };
   auto [p0, s0, b0] = tuple_transform(clamp_fn, std::tuple{_p0, _s0, _b0});
 
-  edge_probability_t p = 1.0 - pow(1.0 - p0, *params.alpha);
-  edge_probability_t p_seed = 1.0 - pow(1.0 - s0, *params.alpha_seed);
-  edge_probability_t p_boost = 1.0 - pow(1.0 - b0, *params.alpha_boost);
+  auto p = static_cast<edge_probability_t>(1.0 - pow(1.0 - p0, *params.alpha));
+  auto p_seed = static_cast<edge_probability_t>(1.0 - pow(1.0 - s0, *params.alpha_seed));
+  auto p_boost = static_cast<edge_probability_t>(1.0 - pow(1.0 - b0, *params.alpha_boost));
 
 #define CHECK_P_RANGE(z, _, p) BOOST_ASSERT_MSG(p >= 0 && p <= 1, BOOST_PP_STRINGIZE(p)" is out of range [0, 1]");
   BOOST_PP_SEQ_FOR_EACH(CHECK_P_RANGE, _, (p)(p_seed)(p_boost))

@@ -20,11 +20,12 @@ inline constexpr auto operator""_ep(long double w) {
 }
 
 struct WIMEdge {
-  float p;
-  float p_seed;
+  edge_probability_t p;
+  edge_probability_t p_seed;
 
   auto is_valid() const -> bool {
-    return 0.0f <= p && p <= p_seed && p_seed <= 1.0f;
+    auto [p_min, p_max] = std::minmax(p, p_seed);
+    return 0.0_ep <= p_min && p_max <= 1.0_ep;
   }
   auto rand_test(bool is_seed) const -> bool {
     return rand_bool(is_seed ? p_seed : p);
@@ -33,12 +34,13 @@ struct WIMEdge {
 };
 
 struct WBIMEdge {
-  float p;
-  float p_seed;
-  float p_boost;
+  edge_probability_t p;
+  edge_probability_t p_seed;
+  edge_probability_t p_boost;
 
   auto is_valid() const -> bool {
-    return 0.0f <= p && p <= std::min(p_seed, p_boost) <= std::max(p_seed, p_boost) <= 1.0f;
+    auto [p_min, p_max] = std::minmax({p, p_seed, p_boost});
+    return 0.0_ep <= p_min && p_max <= 1.0_ep;
   }
   auto rand_test(bool is_seed, bool is_boosted) const -> bool {
     return rand_bool(is_seed ? p_seed : is_boosted ? p_boost : p);

@@ -21,8 +21,7 @@ set(THIRD_PARTY_SOURCE_FILES
 # Enables customized Boost.assert fail handler (see utils/boost_assert.h for details)
 set(COMMON_COMPILE_DEFINITIONS
     BOOST_ENABLE_ASSERT_DEBUG_HANDLER
-    BOOST_STACKTRACE_LINK
-    BOOST_STACKTRACE_USE_BACKTRACE)
+    DEBUG_FIXED_RANDOM_SEED)
 # Enables assertion for GCC libstdc++
 if (CMAKE_BUILD_TYPE AND (CMAKE_BUILD_TYPE STREQUAL "Debug"))
     list(APPEND COMMON_COMPILE_DEFINITIONS _GLIBCXX_ASSERTIONS)
@@ -48,8 +47,17 @@ set(COMMON_LINK_LIBRARIES
     TBB::tbb
     TBB::tbbmalloc)
 
-add_executable(wim
-    main_wim.cpp
+add_executable(wim-experiment
+    main_wim_experiment.cpp
+    coarsening.cpp
+    experiments.cpp
+    wim.cpp
+    ${COMMON_SOURCE_FILES})
+
+add_executable(wim-coarsening-experiment
+    main_wim_coarsening_experiment.cpp
+    coarsening.cpp
+    experiments.cpp
     wim.cpp
     ${COMMON_SOURCE_FILES})
 
@@ -63,7 +71,13 @@ add_executable(to-matrix-market
     to_matrix_market.cpp
     ${COMMON_SOURCE_FILES})
 
-foreach(target wim create-dataset to-matrix-market)
+add_executable(playground
+    playground/mongoose_matching.cpp
+    coarsening.cpp
+    wim.cpp
+    ${COMMON_SOURCE_FILES})
+
+foreach(target wim-experiment wim-coarsening-experiment create-dataset to-matrix-market playground)
     target_compile_definitions(${target} PRIVATE ${COMMON_COMPILE_DEFINITIONS})
     target_include_directories(${target} PRIVATE ${COMMON_INCLUDE_DIRS})
 target_link_libraries(${target} PRIVATE ${COMMON_LINK_LIBRARIES})

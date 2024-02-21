@@ -39,6 +39,7 @@ inline auto for_each_field(T& value, Func&& func) -> void {
 template <class T>
 inline auto read_fields_from_json(T& value, const json& json_root) {
   for_each_field(value, [&json_root]<class Field>(std::string_view key, Field& field) {
+    static_assert(!std::is_const_v<Field>);
     auto it = json_root.find(key);
     if (it != json_root.end()) {
       // Triggers check during operator= for rfl::Validator types

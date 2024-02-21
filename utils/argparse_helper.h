@@ -118,30 +118,43 @@ auto read_argument_parser(ArgumentParser& parser, T& dest) -> void {
 }
 } // namespace details
 
+template <std::default_initializable T, invocable_or_nullptr<ArgumentParser&> AppendExtraArgsFn = std::nullptr_t>
+auto init_argument_parser_generic(ArgumentParser& parser, AppendExtraArgsFn&& append_extra_args_fn = nullptr) noexcept
+    -> void {
+  using FieldTuple = typename rfl::named_tuple_t<T>::Fields;
+  // Step 1: Adds all the members of type T to the parser
+  details::init_argument_parser<FieldTuple, T>(parser);
+  // Step 2: (Optional) Adds customized additional arguments
+  if constexpr (!std::is_null_pointer_v<AppendExtraArgsFn>) {
+    std::invoke(append_extra_args_fn, parser);
+  }
+}
+
+template <std::default_initializable T, invocable_or_nullptr<ArgumentParser&, T&> GetExtraArgsFn = std::nullptr_t>
+auto read_argument_parser_generic(ArgumentParser& parser, T& dest,
+                                  GetExtraArgsFn&& get_extra_args_fn = nullptr) noexcept -> void {
+  using FieldTuple = typename rfl::named_tuple_t<T>::Fields;
+  // Step 1: (Optional) Handles customized arguments first
+  if constexpr (!std::is_null_pointer_v<GetExtraArgsFn>) {
+    std::invoke(get_extra_args_fn, parser, dest);
+  }
+  // Step 2: Gets all the members of T
+  details::read_argument_parser<FieldTuple>(parser, dest);
+}
+
 template <std::default_initializable T, invocable_or_nullptr<ArgumentParser&> AppendExtraArgsFn = std::nullptr_t,
           invocable_or_nullptr<ArgumentParser&, T&> GetExtraArgsFn = std::nullptr_t>
 auto parse_from_args_generic(int argc, char** argv, AppendExtraArgsFn&& append_extra_args_fn = nullptr,
                              GetExtraArgsFn&& get_extra_args_fn = nullptr) noexcept -> rfl::Result<T> try {
   using FieldTuple = typename rfl::named_tuple_t<T>::Fields;
-
-  // Step 1: Prepares the argument parser
+  // Step 1: Prepares the argument parser (see above)
   auto parser = ArgumentParser();
-  // Step 1.1: Adds all the members of type T to the parser
-  details::init_argument_parser<FieldTuple, T>(parser);
-  // Step 1.2: (Optional) Adds customized additional arguments
-  if constexpr (!std::is_null_pointer_v<AppendExtraArgsFn>) {
-    std::invoke(append_extra_args_fn, parser);
-  }
+  init_argument_parser_generic<T>(parser, std::forward<AppendExtraArgsFn>(append_extra_args_fn));
   // Step 2: Performs parsing
   parser.parse_args(argc, argv);
-  // Step 3: Writes each member from the parsing result to the destination value
+  // Step 3: Writes each member from the parsing result to the destination value (see above)
   auto res = T{};
-  // Step 3.1: (Optional) Handles customized arguments first
-  if constexpr (!std::is_null_pointer_v<GetExtraArgsFn>) {
-    std::invoke(get_extra_args_fn, parser, res);
-  }
-  // Step 3.2: Gets all the members of T
-  details::read_argument_parser<FieldTuple>(parser, res);
+  read_argument_parser_generic(parser, res, std::forward<GetExtraArgsFn>(get_extra_args_fn));
   return res;
 } catch (std::exception& e) {
   constexpr auto msg_pattern = "Exception of type '{}' caught during argument parsing: `{}'";

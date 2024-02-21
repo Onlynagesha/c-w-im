@@ -1,10 +1,5 @@
 #include "wim.h"
-#include "utils/histogram.h"
-#include "utils/result.h"
 #include <fmt/ranges.h>
-#include <nlohmann/json.hpp>
-#include <numeric>
-#include <rfl/always_false.hpp>
 #include <ylt/easylog.hpp>
 
 namespace {
@@ -219,78 +214,3 @@ auto wbim_simulate_w(const AdjacencyList<WBIMEdge>& graph, std::span<const verte
   auto after = wim_simulate_generic(graph, seeds, boosted_vertices, vertex_weights, try_count);
   return after - before;
 }
-
-auto wim_experiment(const AdjacencyListPair<WIMEdge>& graph, const WIMParams& params) noexcept
-    -> rfl::Result<json> try {
-  auto timer = nw::util::seconds_timer{};
-  auto json_root = json{};
-
-  const auto& [adj_list, inv_adj_list, vertex_weights] = graph;
-  auto n = adj_list.num_vertices()[0];
-  auto m = adj_list.num_edges();
-
-  json_root["n"] = n;
-  json_root["m"] = m;
-  json_root["num_sketches"] = params.num_sketches;
-  json_root["num_seeds"] = params.num_seeds;
-
-  auto rr_sketches = RRSketchSet{&inv_adj_list, vertex_weights};
-  for (auto r : params.num_sketches) {
-    auto r_key = fmt::format("r = {}", r);
-    auto r_new = r - rr_sketches.num_sketches();
-    timer.start();
-    rr_sketches.append(r_new);
-    timer.stop();
-    auto avg_sketch_size = rr_sketches.average_sketch_size();
-    ELOGFMT(INFO, "Done appending new {} RR-sketches. Average RR-sketche size = {:.3f}; Time used = {:.3f} sec.", r_new,
-            avg_sketch_size, timer.elapsed());
-    ELOGFMT(DEBUG, "{:.2f}% of RR-sketches contains 1 vertex only.", rr_sketches.ratio_of_single_vertex_sketch());
-    ELOGFMT(DEBUG, "Histogram of RR-sketch sizes:\n{}",
-            make_histogram(rr_sketches.sketch_sizes(), params.histogram_width, params.histogram_height));
-
-    json_root["time_used"]["rr_sketch"].push_back({{r_key, timer.elapsed()}});
-    json_root["experiments"].push_back({{"r", r}, {"average_sketch_size", avg_sketch_size}});
-    auto& json_exp = json_root["experiments"].back();
-
-    auto max_n_seeds = params.num_seeds.back();
-    timer.start();
-    auto seed_list = rr_sketches.select(max_n_seeds);
-    timer.stop();
-    ELOGFMT(INFO, "Done selecting {} seeds. Time used = {:.3f} sec.", max_n_seeds, timer.elapsed());
-    ELOG_DEBUG << [&] {
-      auto res = fmt::format("Seeds selected (with average degree = {:.3f}):", 1.0 * m / n);
-      for (auto s : seed_list) {
-        res += fmt::format("\n\tid = {}, degree = {}", s, graph.degree(s));
-      }
-      return res;
-    }();
-
-    json_root["time_used"]["select_seeds"].push_back({{r_key, timer.elapsed()}});
-    json_exp["seeds_selected"] = seed_list;
-
-    auto try_count = params.simulation_try_count.value();
-    for (auto s : params.num_seeds) {
-      auto s_key = fmt::format("s = {}", s);
-      auto seed_set = VertexSet{n, views::counted(seed_list.begin(), s)};
-      timer.start();
-      wim_simulate_w(adj_list, vertex_weights, seed_set, try_count)
-          .and_then([&](double sim_res) -> ResultVoid {
-            timer.stop();
-            constexpr auto msg_pattern_2 =
-                "Done simulation with the first {} seeds. Result = {:.3f}. Time used = {:.3f} sec.";
-            ELOGFMT(INFO, msg_pattern_2, s, sim_res, timer.elapsed());
-
-            json_root["time_used"]["simulate"][r_key].push_back({{s_key, timer.elapsed()}});
-            json_exp["simulation"].push_back({{s_key, sim_res}});
-
-            return RESULT_VOID_SUCCESS;
-          })
-          .or_else([&](const rfl::Error& e) -> ResultVoid {
-            ELOGFMT(ERROR, "\nFailed simulation with {} seeds: `{}'.", s, e.what());
-            return RESULT_VOID_SUCCESS;
-          });
-    }
-  }
-  return std::move(json_root);
-}
-RFL_RESULT_CATCH_HANDLER()

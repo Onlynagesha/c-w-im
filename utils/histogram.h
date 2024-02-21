@@ -1,6 +1,7 @@
 #pragma once
 
 #include "utils/boost_assert.h"
+#include "utils/histogram_shape.h"
 #include "utils/utils.h"
 #include <algorithm>
 #include <fmt/color.h>
@@ -30,7 +31,7 @@ inline auto make_histogram(Xs&& values, size_t display_width, size_t display_hei
     return static_cast<size_t>(std::ceil(h_disp)); // Rounds up, and converts to UNSIGNED integer
   };
   auto display_heights = [&] {
-    auto view =  heights | views::transform(to_display_height);
+    auto view = heights | views::transform(to_display_height);
     return std::vector(view.begin(), view.end());
   }();
 
@@ -65,4 +66,10 @@ inline auto make_histogram(Xs&& values, size_t display_width, size_t display_hei
                                  "# = {}, mean = {:.3f}, std = {:.3f}";
   res += fmt::format(final_pattern, horizontal_line, x_min, x_max, height_min, height_max, n, mean, std);
   return res;
+}
+
+template <ranges::forward_range Xs>
+  requires(std::is_arithmetic_v<ranges::range_value_t<Xs>>)
+inline auto make_histogram(Xs&& values, HistogramShape shape) -> std::string {
+  return make_histogram(std::forward<Xs>(values), shape.display_width, shape.display_height);
 }

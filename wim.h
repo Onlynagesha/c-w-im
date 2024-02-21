@@ -31,36 +31,22 @@ struct AdjacencyListPair {
   }
 };
 
-struct WIMParams {
-  std::string input_file;
-  std::vector<size_t> num_sketches;
-  std::vector<vertex_id_t> num_seeds;
-  rfl::Validator<uint64_t, rfl::Minimum<1>> simulation_try_count = 10'000;
-
-  std::string log_output_file;
-  std::string json_output_file;
-
-  easylog::Severity log_severity = easylog::Severity::DEBUG;
-  bool log_console = false;
-  size_t histogram_width = 100;
-  size_t histogram_height = 20;
-
-  static auto parse_from_args(int argc, char** argv) noexcept -> rfl::Result<WIMParams>;
-};
-
 struct VertexSet {
   std::vector<vertex_id_t> vertex_list;
   DynamicBitset mask;
 
   explicit VertexSet(vertex_id_t n) : vertex_list(), mask(n) {}
 
-  explicit VertexSet(vertex_id_t n, std::span<vertex_id_t> vertices)
+  VertexSet(vertex_id_t n, std::span<const vertex_id_t> vertices)
       : vertex_list(vertices.begin(), vertices.end()), mask(n) {
     for (auto v : vertices) {
       BOOST_ASSERT_MSG(v >= 0 && v < n, "Vertex index out of range [0, n)");
       mask.set(v);
     }
   }
+
+  VertexSet(vertex_id_t n, std::initializer_list<vertex_id_t> vertices)
+      : VertexSet(n, {vertices.begin(), vertices.end()}) {}
 
   auto num_vertices_in_whole_graph() const -> vertex_id_t {
     return static_cast<vertex_id_t>(mask.size());
@@ -119,6 +105,10 @@ struct RRSketchSet {
     return 1.0 * ranges::count(sketch_sizes(), 1) / sketches.size();
   }
 
+  auto percentage_of_single_vertex_sketch() const -> double {
+    return 100.0 * ratio_of_single_vertex_sketch();
+  }
+
   // Appends r new RR-sketches
   auto append(size_t n_sketches) noexcept -> void;
 
@@ -149,4 +139,31 @@ auto wbim_simulate_w(const AdjacencyList<WBIMEdge>& graph, std::span<const verte
                      const VertexSet& seeds, const VertexSet& boosted_vertices, uint64_t try_count) noexcept
     -> rfl::Result<double>;
 
-auto wim_experiment(const AdjacencyListPair<WIMEdge>& graph, const WIMParams& params) noexcept -> rfl::Result<json>;
+inline auto wim_simulate_s(const AdjacencyList<WIMEdge>& graph, std::span<const vertex_id_t> seeds, uint64_t try_count)
+    -> rfl::Result<double> {
+  auto seed_set = VertexSet{graph::num_vertices(graph), seeds};
+  return wim_simulate(graph, seed_set, try_count);
+}
+
+inline auto wim_simulate_w_s(const AdjacencyList<WIMEdge>& graph, std::span<const vertex_weight_t> vertex_weights,
+                             std::span<const vertex_id_t> seeds, uint64_t try_count) noexcept -> rfl::Result<double> {
+  auto seed_set = VertexSet{graph::num_vertices(graph), seeds};
+  return wim_simulate_w(graph, vertex_weights, seed_set, try_count);
+}
+
+inline auto wbim_simulate_s(const AdjacencyList<WBIMEdge>& graph, std::span<const vertex_id_t> seeds,
+                            std::span<const vertex_id_t> boosted_vertices, uint64_t try_count) -> rfl::Result<double> {
+  auto n = graph::num_vertices(graph);
+  auto seed_set = VertexSet{n, seeds};
+  auto boosted_set = VertexSet{n, boosted_vertices};
+  return wbim_simulate(graph, seed_set, boosted_set, try_count);
+}
+
+inline auto wbim_simulate_w_s(const AdjacencyList<WBIMEdge>& graph, std::span<const vertex_weight_t> vertex_weights,
+                              std::span<const vertex_id_t> seeds, std::span<const vertex_id_t> boosted_vertices,
+                              uint64_t try_count) -> rfl::Result<double> {
+  auto n = graph::num_vertices(graph);
+  auto seed_set = VertexSet{n, seeds};
+  auto boosted_set = VertexSet{n, boosted_vertices};
+  return wbim_simulate_w(graph, vertex_weights, seed_set, boosted_set, try_count);
+}

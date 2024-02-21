@@ -1,22 +1,39 @@
 #pragma once
 
+#include "coarsening.h"
 #include "create_dataset.h"
+#include "experiments.h"
 #include "graph_types.h"
 #include "utils/utils.h"
 #include "wim.h"
 #include <fmt/format.h>
 
-#define DUMP_REGISTERED_TYPES(F)          \
-  F(WIMEdge)         /* graph_types.h */  \
-  F(WBIMEdge)        /* graph_types.h */  \
-  F(ReadGraphParams) /* read_dataset.h */ \
-  F(WIMParams)       /* wim.h */
+#define DUMP_REGISTERED_TYPES_AUTO_GENERATED(F)         \
+  F(WIMEdge)                       /* graph_types.h */  \
+  F(WBIMEdge)                      /* graph_types.h */  \
+  F(ReadGraphParams)               /* read_dataset.h */ \
+  F(CoarseningParams)              /* coarsening.h */   \
+  F(WIMExperimentParams)           /* experiments.h */  \
+  F(WIMCoarseningExperimentParams) /* experiments.h */
 
-#define REGISTER_DUMP_FUNCTIONS(Type)                                   \
-  auto dump(const Type& value, int indent = 0) noexcept -> std::string; \
+#define DUMP_REGISTERED_TYPES_MANUAL_IMPLEMENTED(F) \
+  F(CoarsenedVertexDetails) /* coarsening.h */      \
+  F(CoarsenedEdgeDetails)   /* coarsening.h */      \
+  F(CoarseningDetails)      /* coarsening.h */      \
+  F(CoarsenGraphResult)     /* coarsening.h */
+
+#define DUMP_REGISTERED_TYPES(F)          \
+  DUMP_REGISTERED_TYPES_AUTO_GENERATED(F) \
+  DUMP_REGISTERED_TYPES_MANUAL_IMPLEMENTED(F)
+
+#define REGISTER_DUMP_FUNCTIONS_WITHOUT_JSON(Type) auto dump(const Type& value, int indent = 0) noexcept -> std::string;
+
+#define REGISTER_DUMP_FUNCTIONS_WITH_JSON(Type) \
+  REGISTER_DUMP_FUNCTIONS_WITHOUT_JSON(Type)    \
   auto dump_as_json(const Type& value) noexcept -> json;
 
-DUMP_REGISTERED_TYPES(REGISTER_DUMP_FUNCTIONS)
+DUMP_REGISTERED_TYPES_AUTO_GENERATED(REGISTER_DUMP_FUNCTIONS_WITH_JSON)
+DUMP_REGISTERED_TYPES_MANUAL_IMPLEMENTED(REGISTER_DUMP_FUNCTIONS_WITHOUT_JSON)
 
 template <class T>
 concept dump_methods_registered = requires(T t) {

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <boost/assert.hpp>
-#include <execinfo.h>
 #include <fmt/format.h>
 
 namespace details {

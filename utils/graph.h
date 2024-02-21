@@ -37,3 +37,10 @@ inline auto vertices(const Graph& g) {
   auto n = graph::num_vertices(g);
   return std::views::iota(static_cast<decltype(n)>(0), n);
 }
+
+template <graph::graph Graph>
+inline auto graph_n_m(const Graph& g) {
+  auto n = graph::num_vertices(g);
+  auto m = g.num_edges();
+  return std::tuple{n, m};
+}

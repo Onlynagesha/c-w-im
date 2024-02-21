@@ -21,6 +21,7 @@ struct VeryLarge {
   std::string value;
 };
 
+// Expects rfl::Result and std::expected to have the same behavior
 template <class T>
 using ResultType = rfl::Result<T>;
 // using ResultType = std::expected<T, rfl::Error>;
