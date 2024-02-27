@@ -17,10 +17,13 @@
   F(WIMCoarseningExperimentParams) /* experiments.h */
 
 #define DUMP_REGISTERED_TYPES_MANUAL_IMPLEMENTED(F) \
-  F(CoarsenedVertexDetails) /* coarsening.h */      \
-  F(CoarsenedEdgeDetails)   /* coarsening.h */      \
-  F(CoarseningDetails)      /* coarsening.h */      \
-  F(CoarsenGraphResult)     /* coarsening.h */
+  F(CoarsenedVertexBrief)       /* coarsening.h */  \
+  F(CoarsenedVertexDetails)     /* coarsening.h */  \
+  F(CoarsenedEdgeDetails)       /* coarsening.h */  \
+  F(CoarseningBrief)            /* coarsening.h */  \
+  F(CoarseningDetails)          /* coarsening.h */  \
+  F(CoarsenGraphBriefResult)    /* coarsening.h */  \
+  F(CoarsenGraphDetailedResult) /* coarsening.h */
 
 #define DUMP_REGISTERED_TYPES(F)          \
   DUMP_REGISTERED_TYPES_AUTO_GENERATED(F) \

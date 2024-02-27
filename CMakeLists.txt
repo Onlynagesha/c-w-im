@@ -20,8 +20,7 @@ set(THIRD_PARTY_SOURCE_FILES
 
 # Enables customized Boost.assert fail handler (see utils/boost_assert.h for details)
 set(COMMON_COMPILE_DEFINITIONS
-    BOOST_ENABLE_ASSERT_DEBUG_HANDLER
-    DEBUG_FIXED_RANDOM_SEED)
+    BOOST_ENABLE_ASSERT_DEBUG_HANDLER)
 # Enables assertion for GCC libstdc++
 if (CMAKE_BUILD_TYPE AND (CMAKE_BUILD_TYPE STREQUAL "Debug"))
     list(APPEND COMMON_COMPILE_DEFINITIONS _GLIBCXX_ASSERTIONS)
@@ -35,8 +34,10 @@ set(COMMON_INCLUDE_DIRS
 set(COMMON_SOURCE_FILES
     ${THIRD_PARTY_SOURCE_FILES}
     argparse.cpp
+    coarsening.cpp
     dump.cpp
     graph_types.cpp
+    wim.cpp
     )
 set(COMMON_LINK_LIBRARIES
     argparse::argparse

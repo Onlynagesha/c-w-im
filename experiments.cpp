@@ -195,13 +195,13 @@ RFL_RESULT_CATCH_HANDLER()
 template <class ParamsType>
 auto do_wim_experiment_get_seeds(const AdjacencyListPair<WIMEdge>& graph, const ParamsType& params,
                                  json& json_experiments, json& json_time_used) noexcept {
-  return do_wim_experiment_get_seeds(graph.adj_list, graph.inv_adj_list, graph.vertex_weights, params, json_experiments,
-                                     json_time_used);
+  return do_wim_experiment_get_seeds( //
+      graph.adj_list, graph.inv_adj_list, graph.vertex_weights, params, json_experiments, json_time_used);
 }
 
-template <class ParamsType>
-auto do_wim_experiment_get_seeds(const CoarsenGraphResult& graph, const ParamsType& params, json& json_experiments,
-                                 json& json_time_used) noexcept {
+template <class DetailsType, class ParamsType>
+auto do_wim_experiment_get_seeds(const CoarsenGraphResult<DetailsType>& graph, const ParamsType& params,
+                                 json& json_experiments, json& json_time_used) noexcept {
   return do_wim_experiment_get_seeds(graph.coarsened_graph, graph.coarsened_inv_graph, graph.coarsened_vertex_weights,
                                      params, json_experiments, json_time_used);
 }
@@ -374,7 +374,6 @@ auto do_wim_coarsening_experiment(const AdjacencyListPair<WIMEdge>& graph,
     auto [json_experiments, json_time_used] = make_json_cur_items(0);
     // JSON object of each level (including level 0) contains "n" and "m" that represent the corresponding graph size
     write_graph_basic_information(*json_experiments, adj_list);
-    write_graph_connectivity_information(*json_experiments, adj_list, inv_adj_list);
     auto& json_rr_sketch = (*json_experiments)["rr_sketch"];
     // "rr_sketch": [ { "r": 10000, ... }, { "r": 50000, ... } ], see above
     auto tmp = do_wim_experiment_get_seeds(graph, params, json_rr_sketch, *json_time_used)
@@ -384,7 +383,7 @@ auto do_wim_coarsening_experiment(const AdjacencyListPair<WIMEdge>& graph,
     RFL_RETURN_ON_ERROR(tmp);
   }
   // Step 2: Coarsening until the size threshold
-  auto coarsen_results = std::vector<CoarsenGraphResult>{};
+  auto coarsen_results = std::vector<CoarsenGraphBriefResult>{};
   for (auto level = 1_vid, n_coarsened = n; n_coarsened > params.coarsening_threshold; ++level) {
     auto [json_experiments, json_time_used] = make_json_cur_items(level);
     // Step 2.1: Gets the coarsened graph
@@ -398,8 +397,6 @@ auto do_wim_coarsening_experiment(const AdjacencyListPair<WIMEdge>& graph,
     }
     timer.stop();
     const auto& cur_coarsen_result = coarsen_results.back();
-    write_graph_connectivity_information(*json_experiments, cur_coarsen_result.coarsened_graph,
-                                         cur_coarsen_result.coarsened_inv_graph);
     auto [n_cur, m_cur] = write_graph_basic_information(*json_experiments, cur_coarsen_result.coarsened_graph);
     ELOGFMT(INFO, "Done graph coarsening level {}: |V| => {}, |E| => {}; Time used = {:.3f} sec.", //
             level, n_cur, m_cur, timer.elapsed());
@@ -419,7 +416,7 @@ auto do_wim_coarsening_experiment(const AdjacencyListPair<WIMEdge>& graph,
         auto expanding_params = [&]() {
           if (back_level < params.n_fast_expanding_levels) {
             ELOGFMT(DEBUG, "Uses fast S_LOCAL configuration during expansion back to level {}", back_level);
-            return ExpandingParams{.seed_expansion_rule = SeedExpansionRule::S_LOCAL};
+            return ExpandingParams{.seed_expanding_rule = SeedExpandingRule::LOCAL};
           } else {
             ELOGFMT(DEBUG, "Uses user-provided configuration during expansion back to level {}", back_level);
             return *params.expanding;

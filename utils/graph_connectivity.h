@@ -29,12 +29,12 @@ inline auto n_strongly_connected_components_dfs(SCCTarjanContext& ctx, const Adj
   ctx.dfs_timestamp[v] = ctx.low[v] = ctx.next_timestamp++;
   ctx.in_stack.set(v);
   ctx.stack.push(v);
-  for (auto neighbor : graph[v] | views::keys) {
-    if (ctx.dfs_timestamp[neighbor] == SCCTarjanContext::NULL_INDEX) {
-      n_strongly_connected_components_dfs(ctx, graph, neighbor);
-      ctx.low[v] = std::min(ctx.low[v], ctx.low[neighbor]);
-    } else if (ctx.in_stack.test(neighbor)) {
-      ctx.low[v] = std::min(ctx.low[v], ctx.dfs_timestamp[neighbor]); // Back edge detected
+  for (auto u : graph[v] | views::keys) {
+    if (ctx.dfs_timestamp[u] == SCCTarjanContext::NULL_INDEX) {
+      n_strongly_connected_components_dfs(ctx, graph, u);
+      ctx.low[v] = std::min(ctx.low[v], ctx.low[u]);
+    } else if (ctx.in_stack.test(u)) {
+      ctx.low[v] = std::min(ctx.low[v], ctx.dfs_timestamp[u]); // Back edge detected
     }
   }
   // Counts for each DFS root

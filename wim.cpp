@@ -71,7 +71,7 @@ auto wim_simulate_generic(const AdjacencyList<E>& graph, const VertexSet& seeds,
 } // namespace
 
 auto RRSketchSet::append_single(std::span<vertex_id_t> vertices) noexcept -> void {
-  auto next_sketch = std::pmr::vector<vertex_id_t>{vertices.begin(), vertices.end(), allocator};
+  auto next_sketch = std::vector<vertex_id_t>{vertices.begin(), vertices.end()};
   auto next_sketch_id = sketches.size();
   for (auto v : vertices) {
     BOOST_ASSERT_MSG(v >= 0 && v < num_vertices(), "Vertex index out of range [0, n).");

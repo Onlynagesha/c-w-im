@@ -2,93 +2,107 @@
 #include "dump.h"
 #include "playground/sample_graph.h"
 #include "utils/graph_connectivity.h"
+#include "utils/histogram.h"
 #include <fmt/ranges.h>
 #include <nwgraph/adaptors/edge_range.hpp>
 #include <nwgraph/adaptors/neighbor_range.hpp>
 #include <ylt/easylog.hpp>
 
-int main() {
-  auto irr_graph = DirectedEdgeList<double>{};
-  irr_graph.open_for_push_back();
-  irr_graph.push_back(5, 10, 1.25);
-  irr_graph.push_back(10, 5, 1.75);
-  irr_graph.push_back(10, 20, 2.25);
-  irr_graph.close_for_push_back();
+auto monte_carlo_simulate(const AdjacencyList<WIMEdge>& graph, const VertexSet& seeds, const VertexSet& dest,
+                          uint64_t try_count) -> double {
+  auto success_count = 0.0;
+  auto queue = std::vector<vertex_id_t>();
+  auto vis = DynamicBitset{};
+  ELOGFMT(INFO, "seeds = {}, {:b}, dest = {}, {:b}", //
+          seeds.vertex_list, seeds.mask.to_ulong(), dest.vertex_list, dest.mask.to_ulong());
+  for (auto attempt_index : range(try_count)) {
+    queue = {seeds.vertex_list.begin(), seeds.vertex_list.end()};
+    vis = seeds.mask;
 
-  auto irr_adj_list = AdjacencyList<double>{irr_graph};
-  ELOGFMT(INFO, "irr_adj_list: |V| = {}, |E| = {}", irr_adj_list.num_vertices()[0], irr_adj_list.num_edges());
-  for (auto [u, v, w] : nw::graph::make_edge_range<0>(irr_adj_list)) {
-    ELOGFMT(INFO, "\t({}, {}): {}", u, v, w);
+    for (size_t qi = 0; qi < queue.size(); qi++) {
+      auto cur = queue[qi];
+      if (dest.contains(cur)) {
+        // ELOGFMT(INFO, "Attempt #{}: Current queue = {}", attempt_index, queue);
+        success_count += 1.0;
+        break;
+      }
+      for (auto [v, w] : graph[cur]) {
+        if (!vis.test(v) && rand_bool(w.p)) {
+          queue.push_back(v);
+          vis.set(v);
+        }
+      }
+    }
   }
-  auto irr_n_scc = n_strongly_connected_components(irr_adj_list);
-  auto irr_n_wcc = n_weakly_connected_components(irr_adj_list, InvAdjacencyList<double>{irr_graph});
-  ELOGFMT(INFO, "# of SCC = {}; # of WCC = {}", irr_n_scc, irr_n_wcc);
+  return success_count / try_count;
+}
 
-  auto [graph, inv_graph] = make_sample_wim_graph();
+auto monte_carlo_test(const AdjacencyList<WIMEdge>& graph) {
+  ELOG_INFO << [&] {
+    constexpr auto msg_pattern_header = "Current graph to be tested: |V|, |E| = {}";
+    auto res = fmt::format(msg_pattern_header, graph_n_m(graph));
+    for (auto [u, v, p] : graph::make_edge_range<0>(remove_const(graph))) {
+      res += fmt::format("\n\tu = {}, v = {}, p = {}", u, v, p);
+    }
+    return res;
+  }();
+  for (auto seed : std::vector<vertex_id_t>{0, 2, 4, 6}) {
+    auto result = monte_carlo_simulate(graph, {7, {seed}}, {7, {1, 3, 5}}, 2'000'000uLL);
+    ELOGFMT(INFO, "Simulated result with seed {} = {:.6f}", seed, result);
+  }
+  for (auto seeds : std::vector<VertexSet>{{7, {0, 2}}, {7, {0, 4}}, {7, {2, 4}}}) {
+    auto result = monte_carlo_simulate(graph, seeds, {7, {1, 3, 5}}, 2'000'000uLL);
+    ELOGFMT(INFO, "Simulated result with seed {} = {:.6f}", seeds.vertex_list, result);
+  }
+}
+
+int main() {
+  easylog::set_min_severity(easylog::Severity::TRACE);
+
+  auto rand_values = range(1'000'000) | TRANSFORM_VIEW(rand_float());
+  ELOGFMT(INFO, "Histogram of rand_values:\n{}", make_histogram(rand_values, 100, 20));
+
+  auto [graph, inv_graph] = make_sample_wim_graph_1();
   auto coarsening_params = CoarseningParams{.neighbor_match_rule = NeighborMatchRule::HEM_P_MAX,
-                                            .group_path_probability_rule = GroupPathProbabilityRule::P_SEPARATE,
-                                            .group_in_out_rule = GroupInOutRule::W,
+                                            .edge_weight_rule = EdgeWeightRule::SEPARATE_PRECISE,
+                                            .in_out_heuristic_rule = InOutHeuristicRule::P,
                                             .vertex_weight_rule = VertexWeightRule::AVERAGE_BY_PATHS,
-                                            .seed_merge_rule = SeedMergeRule::S_SINGLE};
+                                            .seed_merging_rule = SeedMergingRule::SINGLE};
   auto expanding_params = ExpandingParams{
-      .seed_expansion_rule = SeedExpansionRule::S_ITERATIVE, .n_iterations = 10, .simulation_try_count = 10};
+      .seed_expanding_rule = SeedExpandingRule::ITERATIVE, .n_iterations = 5, .simulation_try_count = 5};
 
   auto bidir_graph = merge_wim_edge_to_undirected(graph, coarsening_params);
   ELOG_INFO << [&] {
-    constexpr auto msg_pattern_header = "Merged bidirectional graph (|V| = {}, |E| = {}):";
-    auto res = fmt::format(msg_pattern_header, bidir_graph.num_vertices()[0], bidir_graph.num_edges());
+    constexpr auto msg_pattern_header = "Merged bidirectional graph: |V|, |E| = {}";
+    auto res = fmt::format(msg_pattern_header, graph_n_m(bidir_graph));
     for (auto [u, v, p] : graph::make_edge_range<0>(bidir_graph)) {
       res += fmt::format("\n\tu = {}, v = {}, p = {}", u, v, p);
     }
     return res;
   }();
 
-  // Without seeds
-  {
-    auto group_result = mongoose_match(bidir_graph, coarsening_params);
-    ELOG_INFO << [&] {
-      auto res = fmt::format("Group result #1 (with n_groups = {}):", group_result.n_groups);
-      for (auto [v, g] : views::enumerate(group_result.group_id)) {
-        res += fmt::format("\n\t{}: {}", v, g);
-      }
-      return res;
-    }();
-    auto vertex_weights = [&]() {
-      auto view = views::iota(vertex_id_t{10}, vertex_id_t{10} + graph::num_vertices(graph));
-      return std::vector<vertex_weight_t>(view.begin(), view.end());
-    }();
-    auto coarsening_res = do_coarsen_wim_graph_w(graph, inv_graph, vertex_weights, group_result.n_groups,
-                                                 group_result.group_id, coarsening_params);
-    ELOGFMT(INFO, "Coarsening result: {:4}", coarsening_res);
-  }
-  ELOG_INFO << "==============================================================";
-  // With seeds
-  {
-    auto seeds = {1_vid, 7_vid};
-    auto group_result = mongoose_match_with_seeds(bidir_graph, seeds, coarsening_params);
-    ELOG_INFO << [&] {
-      auto res = fmt::format("Group result #2 (with n_groups = {}, seeds = {}):", group_result.n_groups, seeds);
-      for (auto [v, g] : views::enumerate(group_result.group_id)) {
-        res += fmt::format("\n\t{}: {}", v, g);
-      }
-      return res;
-    }();
-    auto vertex_weights = [&]() {
-      auto view = views::iota(vertex_id_t{10}, vertex_id_t{10} + graph::num_vertices(graph));
-      return std::vector<vertex_weight_t>(view.begin(), view.end());
-    }();
-    auto coarsening_res = do_coarsen_wim_graph_w(graph, inv_graph, vertex_weights, group_result.n_groups,
-                                                 group_result.group_id, coarsening_params);
-    ELOGFMT(INFO, "Coarsening result: {:4}", coarsening_res);
+  auto vertex_weights = [&]() {
+    auto view = views::iota(vertex_id_t{10}, vertex_id_t{10} + graph::num_vertices(graph));
+    return std::vector<vertex_weight_t>(view.begin(), view.end());
+  }();
+  auto n_groups = 4;
+  auto group_id = std::vector<vertex_id_t>{0, 1, 2, 0, 1, 2, 0, 1, 2, 3};
 
-    auto coarsened_seeds = std::vector<vertex_id_t>{0, 2, 3};
+  auto brief_res = coarsen_wim_graph_with_match_result_w( //
+      graph, inv_graph, vertex_weights, n_groups, group_id, coarsening_params);
+  ELOGFMT(INFO, "Brief coarsening result: {:4}", brief_res);
 
-    expand_wim_seed_vertices_w(graph, vertex_weights, coarsening_res, coarsened_seeds, expanding_params)
-        .and_then([&](ExpandSeedResult expand_res) -> ResultVoid {
-          ELOGFMT(INFO, "Expanded seeds: {}", expand_res.expanded_seeds);
-          return RESULT_VOID_SUCCESS;
-        });
-  }
+  auto detailed_res = coarsen_wim_graph_with_match_result_d_w( //
+      graph, inv_graph, vertex_weights, n_groups, group_id, coarsening_params);
+  ELOGFMT(INFO, "Detailed coarsening result: {:4}", detailed_res);
+
+  auto [graph_left, inv_graph_left] = make_sample_wim_graph_1_left();
+  ELOG_INFO << "Testing left part with simulation:";
+  monte_carlo_test(graph_left);
+
+  auto [graph_right, inv_graph_right] = make_sample_wim_graph_1_right();
+  ELOG_INFO << "Testing right part with simulation:";
+  monte_carlo_test(graph_right);
 
   return 0;
 }

@@ -15,6 +15,9 @@
 #define LAMBDA_1(...) [&](auto&& _1) { return (__VA_ARGS__); }
 #define LAMBDA_2(...) [&](auto&& _1, auto&& _2) { return (__VA_ARGS__); }
 
+#define FILTER_VIEW(...) std::views::filter(LAMBDA_1(__VA_ARGS__))
+#define TRANSFORM_VIEW(...) std::views::transform(LAMBDA_1(__VA_ARGS__))
+
 #define DUMP_ARRAY(arr) dump_array(#arr, arr)
 #define DUMP_INDEX_ARRAY(arr) dump_index_array(#arr, arr)
 
@@ -76,6 +79,56 @@ concept invocable_or_nullptr = std::same_as<Func, std::nullptr_t> || std::invoca
 template <class Func, class Ret, class... Args>
 concept invocable_r_or_nullptr = std::same_as<Func, std::nullptr_t> || std::is_invocable_r_v<Ret, Func, Args...>;
 
+namespace details {
+template <auto K, class T>
+struct IntegerSequenceOffsetHelper {};
+
+template <auto K, class T, T... Values>
+struct IntegerSequenceOffsetHelper<K, std::integer_sequence<T, Values...>> {
+  using type = std::integer_sequence<T, (static_cast<T>(K) + Values)...>;
+};
+
+template <class T>
+struct MemberObjectPointerHelper : std::false_type {};
+
+template <class ClassType, class MemberType>
+struct MemberObjectPointerHelper<MemberType ClassType::*> : std::true_type {
+  using class_type = ClassType;
+  using member_type = MemberType;
+};
+} // namespace details
+
+template <size_t N, size_t Offset>
+using make_index_sequence_by_offset = details::IntegerSequenceOffsetHelper<Offset, std::make_index_sequence<N>>::type;
+
+template <class T, class ClassType>
+concept member_object_pointer_from =
+    details::MemberObjectPointerHelper<T>::value &&
+    std::is_same_v<typename details::MemberObjectPointerHelper<T>::class_type, ClassType>;
+
+template <class T, class ClassType, class MemberType>
+concept member_object_pointer_from_to =
+    details::MemberObjectPointerHelper<T>::value &&
+    std::is_same_v<typename details::MemberObjectPointerHelper<T>::class_type, ClassType> &&
+    std::is_same_v<typename details::MemberObjectPointerHelper<T>::member_type, MemberType>;
+
+#define UTILS_RANGE_CATEGORIES(F) \
+  F(input)                        \
+  F(forward)                      \
+  F(bidirectional)                \
+  F(random_access)                \
+  F(contiguous)
+
+#define UTILS_DEFINE_CONCEPT_RANGE_OF(category)                                                                       \
+  template <class T, class ValueType>                                                                                 \
+  concept category##_range_of =                                                                                       \
+      ranges::category##_range<T> && std::is_convertible_v<ranges::range_value_t<std::remove_cvref_t<T>>, ValueType>; \
+  template <class T, class ValueType>                                                                                 \
+  concept category##_range_of_exactly =                                                                               \
+      ranges::category##_range<T> && std::is_same_v<ranges::range_value_t<std::remove_cvref_t<T>>, ValueType>;
+
+UTILS_RANGE_CATEGORIES(UTILS_DEFINE_CONCEPT_RANGE_OF)
+
 // WARNING: No thread safety.
 #ifdef DEBUG_FIXED_RANDOM_SEED
 inline auto rand_engine = std::minstd_rand{1u};
@@ -111,24 +164,60 @@ inline auto rand_element(Range&& range) -> ranges::range_value_t<std::remove_cvr
   return range[rand_index(ranges::size(range))];
 }
 
+template <class T>
+inline constexpr auto remove_const(const T& value) -> T& {
+  return const_cast<T&>(value);
+}
+
 template <std::integral IntType>
-inline auto range(IntType n) {
+inline constexpr auto range(IntType n) {
   return views::iota(static_cast<IntType>(0), n);
 }
 
 template <std::integral IntType>
-inline auto range(IntType first, IntType last) {
+inline constexpr auto range(IntType first, IntType last) {
   return views::iota(first, last);
 }
 
 template <std::input_or_output_iterator Iter, std::sentinel_for<Iter> Sentinel>
-inline auto range(Iter first, Sentinel last) {
+inline constexpr auto range(Iter first, Sentinel last) {
   return ranges::subrange{first, last};
 }
 
+template <ranges::input_range Range>
+  requires(std::unsigned_integral<ranges::range_value_t<Range>>)
+inline constexpr auto make_bitset_from_indices(Range&& indices) -> ranges::range_value_t<Range> {
+  using ResultType = ranges::range_value_t<Range>;
+  auto res = ResultType{0};
+  for (auto i : indices) {
+    res |= (ResultType{1} << i);
+  }
+  return res;
+}
+
+template <std::unsigned_integral T>
+inline constexpr auto make_bitset_from_indices(std::initializer_list<T> indices) -> T {
+  return make_bitset_from_indices(std::span{indices});
+}
+
+template <std::unsigned_integral T>
+inline constexpr auto bitset_contains_index(T index, T bitset) -> bool {
+  return (bitset & (T{1} << index)) != 0;
+}
+
+template <std::unsigned_integral T>
+inline constexpr auto indices_in_bitset(T N, T bitset) {
+  return range(N) | std::views::filter([bitset](T index) { return bitset_contains_index(index, bitset); });
+}
+
+template <std::unsigned_integral T>
+inline constexpr auto indices_in_bitset(T bitset) {
+  return indices_in_bitset(std::bit_width(bitset), bitset);
+}
+
 template <class T, ranges::input_range Range>
-  requires(std::is_convertible_v<ranges::range_value_t<std::remove_cvref_t<Range>>, T>)
-inline constexpr auto accumulate_sum(Range&& range, T init = T{}) -> T {
+  requires(std::is_convertible_v<ranges::range_value_t<Range>, T>)
+inline constexpr auto accumulate_sum(Range&& range, T init) -> T {
   for (auto&& elem : range) {
     init = init + forward_like<Range>(elem);
   }
@@ -136,8 +225,22 @@ inline constexpr auto accumulate_sum(Range&& range, T init = T{}) -> T {
 }
 
 template <ranges::input_range Range>
-inline constexpr auto accumulate_sum(Range&& range) -> ranges::range_value_t<std::remove_cvref_t<Range>> {
+inline constexpr auto accumulate_sum(Range&& range) -> ranges::range_value_t<Range> {
   return accumulate_sum(range, ranges::range_value_t<Range>{});
+}
+
+template <class T, ranges::input_range Range>
+  requires(std::is_convertible_v<ranges::range_value_t<Range>, T>)
+inline constexpr auto accumulate_product(Range&& range, T init) -> T {
+  for (auto&& elem : range) {
+    init = init * forward_like<Range>(elem);
+  }
+  return init;
+}
+
+template <ranges::input_range Range>
+inline constexpr auto accumulate_product(Range&& range) -> ranges::range_value_t<Range> {
+  return accumulate_product(range, ranges::range_value_t<Range>{1});
 }
 
 template <std::floating_point... Args>
@@ -150,7 +253,7 @@ inline constexpr auto at_least_1_probability(Args... p_args) -> std::common_type
 
 template <ranges::input_range Range>
   requires(std::is_floating_point_v<ranges::range_value_t<Range>>)
-inline constexpr auto at_least_1_probability_of_range(const Range& range) -> ranges::range_value_t<Range> {
+inline constexpr auto at_least_1_probability_of_range(Range&& range) -> ranges::range_value_t<Range> {
   using ResultType = ranges::range_value_t<Range>;
   auto prod = static_cast<ResultType>(1.0);
   for (auto p : range) {

@@ -4,7 +4,6 @@
 #include "utils/boost_assert.h"
 #include "utils/dynamic_bitset.h"
 #include "utils/graph.h"
-#include <memory_resource>
 #include <rfl/Size.hpp>
 #include <rfl/Validator.hpp>
 #include <rfl/comparisons.hpp>
@@ -63,24 +62,20 @@ struct VertexSet {
 };
 
 struct RRSketchSet {
-  using Allocator = std::pmr::polymorphic_allocator<vertex_id_t>;
-
-  static inline auto* allocator = new std::pmr::monotonic_buffer_resource{};
-
   const InvAdjacencyList<WIMEdge>* inv_graph;
   std::discrete_distribution<vertex_id_t> center_distribution;
   // sketches[i] = { v1, v2... }, all the vertices in the i-th RR-sketch
-  std::pmr::vector<std::pmr::vector<vertex_id_t>> sketches;
+  std::vector<std::vector<vertex_id_t>> sketches;
   // inv_sketches[v] = { i1, i2 ... }, all the RR-sketches that contain v
-  std::pmr::vector<std::pmr::vector<size_t>> inv_sketches;
+  std::vector<std::vector<size_t>> inv_sketches;
 
   explicit RRSketchSet(const InvAdjacencyList<WIMEdge>* inv_graph, std::span<const vertex_weight_t> vertex_weights)
-      : inv_graph(inv_graph), center_distribution(vertex_weights.begin(), vertex_weights.end()), sketches(allocator),
-        inv_sketches(allocator) {
+      : inv_graph(inv_graph), center_distribution(vertex_weights.begin(), vertex_weights.end()), sketches(),
+        inv_sketches() {
     BOOST_ASSERT_MSG(vertex_weights.size() == graph::num_vertices(*inv_graph),
                      "Mismatch between # of vertices in the graph and # of vertices in the weight list.");
     auto n = graph::num_vertices(*inv_graph);
-    inv_sketches.assign(n, std::pmr::vector<size_t>{allocator});
+    inv_sketches.assign(n, std::vector<size_t>{});
   }
 
   auto num_vertices() const -> vertex_id_t {
