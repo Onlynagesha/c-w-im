@@ -1,6 +1,7 @@
 #pragma once
 
 #include "graph_types.h"
+#include "utils/flat_map.h"
 #include "utils/result.h"
 #include "utils/static_vector.h"
 #include <array>
@@ -11,6 +12,8 @@
 enum class NeighborMatchRule { HEM_P_MAX, HEM_P_PRODUCT, LEM_P_MAX, LEM_P_PRODUCT };
 
 enum class EdgeWeightRule { SEPARATE_SIMPLE, MERGED_SIMPLE, SEPARATE_PRECISE, MERGED_PRECISE };
+
+enum class EdgeSeedWeightRule { AVERAGE, MAX, BEST_SEED_INDEX };
 
 enum class InOutHeuristicRule { NONE, P, W };
 
@@ -23,6 +26,7 @@ enum class SeedExpandingRule { LOCAL, SIMULATIVE, ITERATIVE };
 struct CoarseningParams {
   NeighborMatchRule neighbor_match_rule = NeighborMatchRule::HEM_P_MAX;
   EdgeWeightRule edge_weight_rule = EdgeWeightRule::SEPARATE_SIMPLE;
+  EdgeSeedWeightRule edge_seed_weight_rule = EdgeSeedWeightRule::BEST_SEED_INDEX;
   InOutHeuristicRule in_out_heuristic_rule = InOutHeuristicRule::P;
   VertexWeightRule vertex_weight_rule = VertexWeightRule::AVERAGE_BY_PATHS;
   SeedMergingRule seed_merging_rule = SeedMergingRule::UNUSED;
@@ -116,6 +120,8 @@ struct CoarsenedVertexDetails {
   PInternalContainer p_internal;
   // Matrix of shape (M, M). p_seed_internal[i][j] = p_seed of the directed edge members[i] -> members[j]
   PInternalContainer p_seed_internal;
+  // Index in range [0, M), the best expanded seed by local information.
+  size_t best_seed_index;
 
   auto dump(int indent = 0, int level = 0) const noexcept -> std::string;
 
@@ -172,7 +178,7 @@ struct CoarseningBrief {
 
 struct CoarseningDetails {
   using VertexPair = std::pair<vertex_id_t, vertex_id_t>;
-  using EdgeDetailsMap = std::map<VertexPair, CoarsenedEdgeDetails>;
+  using EdgeDetailsMap = FlatMap<VertexPair, CoarsenedEdgeDetails>;
 
   // N, # of vertices before coarsening
   vertex_id_t n;

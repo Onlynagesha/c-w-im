@@ -104,6 +104,29 @@ struct RRSketchSet {
     return 100.0 * ratio_of_single_vertex_sketch();
   }
 
+  auto rr_sketch_total_size_bytes() const -> size_t {
+    auto res = sketches.capacity() * sizeof(decltype(sketches)::value_type) +
+               inv_sketches.capacity() * sizeof(decltype(inv_sketches)::value_type);
+    for (const auto& s : sketches) {
+      res += s.capacity() * sizeof(vertex_id_t);
+    }
+    for (const auto& is : inv_sketches) {
+      res += is.capacity() * sizeof(size_t);
+    }
+    return res;
+  }
+
+  auto rr_sketch_total_size_str() const -> std::string {
+    constexpr auto UNITS = std::array{"Bytes", "KibiBytes", "Mebibytes", "Gibibytes"};
+    auto value = static_cast<double>(rr_sketch_total_size_bytes());
+    auto unit_index = 0;
+    while (value >= 1024.0 && unit_index + 1 < UNITS.size()) {
+      value /= 1024.0;
+      unit_index += 1;
+    }
+    return fmt::format("{:.3f} {}", value, UNITS[unit_index]);
+  }
+
   // Appends r new RR-sketches
   auto append(size_t n_sketches) noexcept -> void;
 

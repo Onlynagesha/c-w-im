@@ -253,7 +253,7 @@ inline constexpr auto at_least_1_probability(Args... p_args) -> std::common_type
 
 template <ranges::input_range Range>
   requires(std::is_floating_point_v<ranges::range_value_t<Range>>)
-inline constexpr auto at_least_1_probability_of_range(Range&& range) -> ranges::range_value_t<Range> {
+inline constexpr auto at_least_1_probability_r(Range&& range) -> ranges::range_value_t<Range> {
   using ResultType = ranges::range_value_t<Range>;
   auto prod = static_cast<ResultType>(1.0);
   for (auto p : range) {

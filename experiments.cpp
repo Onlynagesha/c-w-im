@@ -94,12 +94,14 @@ auto write_wim_basic_information(json& json_root, const AdjacencyList<WIMEdge>& 
 
 auto write_graph_connectivity_information(json& json_root, const AdjacencyList<WIMEdge>& graph,
                                           const InvAdjacencyList<WIMEdge>& inv_graph) {
-  auto n_scc = n_strongly_connected_components(graph);
+  // auto n_scc = n_strongly_connected_components(graph);
   auto n_wcc = n_weakly_connected_components(graph, inv_graph);
-  ELOGFMT(INFO, "# of strongly connected components = {}; # of weakly connected components = {}", n_scc, n_wcc);
-  json_root["n_scc"] = n_scc;
+  ELOGFMT(INFO, "# of strongly connected components = {}; # of weakly connected components = {}", //
+          "(Not accessible yet)", n_wcc);
+  // json_root["n_scc"] = n_scc;
   json_root["n_wcc"] = n_wcc;
-  return std::tuple{n_scc, n_wcc};
+  // return std::tuple{n_scc, n_wcc};
+  return n_wcc;
 }
 
 /*
@@ -157,12 +159,18 @@ auto do_wim_experiment_get_seeds(const AdjacencyList<WIMEdge>& adj_list, const I
     auto avg_sketch_size = rr_sketches.average_sketch_size();
     // Log of time usage & statistics of RR-sketches
     constexpr auto msg_pattern_1 = //
-        "Done appending new {1} RR-sketches in {3:.3f} sec. "
-        "Average size of all the {0} RR-sketches = {4:.3f} "
-        "(with {5:.2f}% of RR-sketches that contains 1 vertex only.); "
-        "Total time used = {2:.3f} sec. ";
-    ELOGFMT(INFO, msg_pattern_1, r, r_new, rr_sketches_total_time_used, rr_sketches_new_time_used, avg_sketch_size,
-            rr_sketches.percentage_of_single_vertex_sketch());
+        "Done appending new {1} RR-sketches in {3:.3f} sec."
+        "\n\tAverage size of all the {0} RR-sketches = {4:.3f}"
+        "\n\t\t(with {5:.2f}% of RR-sketches that contains 1 vertex only.)."
+        "\n\tTotal time used = {2:.3f} sec."
+        "\n\tEstimated memory usage = {6}.";
+    ELOGFMT(INFO, msg_pattern_1,                                    //
+            r, r_new,                                               // {0}, {1}
+            rr_sketches_total_time_used, rr_sketches_new_time_used, // {2}, {3}
+            avg_sketch_size,                                        // {4}
+            rr_sketches.percentage_of_single_vertex_sketch(),       // {5}
+            rr_sketches.rr_sketch_total_size_str()                  // {6}
+    );
     // Histogram of the distribution of RR-sketch size
     ELOGFMT(DEBUG, "Histogram of RR-sketch sizes:\n{}",
             make_histogram(rr_sketches.sketch_sizes(), params.common->histogram_shape()));
@@ -374,6 +382,7 @@ auto do_wim_coarsening_experiment(const AdjacencyListPair<WIMEdge>& graph,
     auto [json_experiments, json_time_used] = make_json_cur_items(0);
     // JSON object of each level (including level 0) contains "n" and "m" that represent the corresponding graph size
     write_graph_basic_information(*json_experiments, adj_list);
+    write_graph_connectivity_information(*json_experiments, adj_list, inv_adj_list);
     auto& json_rr_sketch = (*json_experiments)["rr_sketch"];
     // "rr_sketch": [ { "r": 10000, ... }, { "r": 50000, ... } ], see above
     auto tmp = do_wim_experiment_get_seeds(graph, params, json_rr_sketch, *json_time_used)
@@ -400,8 +409,13 @@ auto do_wim_coarsening_experiment(const AdjacencyListPair<WIMEdge>& graph,
     auto [n_cur, m_cur] = write_graph_basic_information(*json_experiments, cur_coarsen_result.coarsened_graph);
     ELOGFMT(INFO, "Done graph coarsening level {}: |V| => {}, |E| => {}; Time used = {:.3f} sec.", //
             level, n_cur, m_cur, timer.elapsed());
+    // Sets n_coarsened, i.e. current # of vertices
     n_coarsened = n_cur;
+    // Checks connectivity for debugging & data analysis
+    write_graph_connectivity_information(*json_experiments, cur_coarsen_result.coarsened_graph,
+                                         cur_coarsen_result.coarsened_inv_graph);
     (*json_time_used)["coarsen"] = timer.elapsed();
+
     // Step 2: Perform seed selection with the coarsened graph
     auto seed_lists =
         do_wim_experiment_get_seeds(cur_coarsen_result, params, (*json_experiments)["rr_sketch"], *json_time_used);
@@ -441,6 +455,7 @@ auto do_wim_coarsening_experiment(const AdjacencyListPair<WIMEdge>& graph,
       (*json_experiments)["expanding_seeds"].push_back({{"r", n_sketches}, {"expanded_seeds", sl}});
       (*json_time_used)["expand_seeds"].push_back({{"r", n_sketches}, {"seconds", timer.elapsed()}});
     }
+
     // Step 3: Simulation with expanded seeds
     auto sim_res = do_wim_experiment_simulate( //
         graph, *seed_lists, params, (*json_experiments)["simulation"], *json_time_used);
