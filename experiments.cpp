@@ -1,6 +1,7 @@
 #include "experiments.h"
 #include "dump.h"
-#include "utils/graph_connectivity.h"
+#include "graph_connectivity.h"
+#include "utils/easylog.h"
 #include "utils/histogram.h"
 #include "wim.h"
 #include <fmt/ranges.h>
@@ -12,7 +13,7 @@ using SelectedSeedLists = std::vector<std::vector<vertex_id_t>>;
 inline auto init_easylog(const CommonExperimentParams& params) {
   easylog::set_min_severity(params.log_severity);
   if (!params.log_output_file.empty()) {
-    easylog::init_log(params.log_severity, params.log_output_file, false, params.log_console);
+    easylog::init_log(params.log_severity, params.log_output_file, true, params.log_console);
   }
 }
 
@@ -35,7 +36,7 @@ inline auto create_json_fout_ptr(const std::string& out_path) -> std::unique_ptr
 
 inline auto dump_to_json_fout_str(std::ofstream* fout, std::string_view contents) -> void {
   if (fout != nullptr) {
-    ELOGFMT(DEBUG, "JSON output: {}", contents);
+    MYLOG_FMT_DEBUG("JSON output: {}", contents);
     (*fout) << contents;
   } else {
     ELOGFMT(INFO, "JSON output: {}", contents);
@@ -172,8 +173,8 @@ auto do_wim_experiment_get_seeds(const AdjacencyList<WIMEdge>& adj_list, const I
             rr_sketches.rr_sketch_total_size_str()                  // {6}
     );
     // Histogram of the distribution of RR-sketch size
-    ELOGFMT(DEBUG, "Histogram of RR-sketch sizes:\n{}",
-            make_histogram(rr_sketches.sketch_sizes(), params.common->histogram_shape()));
+    MYLOG_FMT_DEBUG("Histogram of RR-sketch sizes:\n{}",
+                    make_histogram(rr_sketches.sketch_sizes(), params.common->histogram_shape()));
     // JSON
     add_key_to_ith_array_element_by_r(json_time_used_rr_sketch, "seconds", i, r) = rr_sketches_total_time_used;
     add_key_to_ith_array_element_by_r(json_experiments, "average_sketch_size", i, r) = avg_sketch_size;
@@ -184,14 +185,14 @@ auto do_wim_experiment_get_seeds(const AdjacencyList<WIMEdge>& adj_list, const I
     timer.stop();
     constexpr auto msg_pattern_2 = "Done selecting {} seeds with {} RR-sketches. Time used = {:.3f} sec.";
     ELOGFMT(INFO, msg_pattern_2, max_n_seeds, r, timer.elapsed());
-    ELOG_DEBUG << [&] {
+    MYLOG_DEBUG([&] {
       auto res = fmt::format("Seeds selected (with average degree = {:.3f}):", 1.0 * m / n);
       for (auto s : seed_list) {
         auto deg = graph::degree(inv_adj_list, s) + graph::degree(adj_list, s); // In-deg + Out-deg
         res += fmt::format("\n\tid = {}, degree = {}", s, deg);
       }
       return res;
-    }();
+    }());
     add_key_to_ith_array_element_by_r(json_time_used_select_seeds, "seconds", i, r) = timer.elapsed();
     add_key_to_ith_array_element_by_r(json_experiments, "seeds_selected", i, r) = seed_list;
     res.push_back(std::move(seed_list));
@@ -423,16 +424,16 @@ auto do_wim_coarsening_experiment(const AdjacencyListPair<WIMEdge>& graph,
     // Seed list that corresponds to each # of RR-sketches
     for (auto [i, sl] : *seed_lists | views::enumerate) {
       auto n_sketches = params.wim->num_sketches[i];
-      ELOGFMT(DEBUG, "Seed list #{}: Initial seeds with r = {}: {}", i, n_sketches, sl);
+      MYLOG_FMT_DEBUG("Seed list #{}: Initial seeds with r = {}: {}", i, n_sketches, sl);
       timer.start();
       // Rewinds to level 0 (i,e. seeds of the original graph)
       for (auto back_level : range(level) | views::reverse) {
         auto expanding_params = [&]() {
           if (back_level < params.n_fast_expanding_levels) {
-            ELOGFMT(DEBUG, "Uses fast S_LOCAL configuration during expansion back to level {}", back_level);
+            MYLOG_FMT_DEBUG("Uses fast S_LOCAL configuration during expansion back to level {}", back_level);
             return ExpandingParams{.seed_expanding_rule = SeedExpandingRule::LOCAL};
           } else {
-            ELOGFMT(DEBUG, "Uses user-provided configuration during expansion back to level {}", back_level);
+            MYLOG_FMT_DEBUG("Uses user-provided configuration during expansion back to level {}", back_level);
             return *params.expanding;
           }
         }();
@@ -446,12 +447,12 @@ auto do_wim_coarsening_experiment(const AdjacencyListPair<WIMEdge>& graph,
           }
         }();
         RFL_RETURN_ON_ERROR(expand_res);
-        ELOGFMT(DEBUG, "Seeds expansion back to level {} -> {}", back_level, expand_res->expanded_seeds);
+        MYLOG_FMT_DEBUG("Seeds expansion back to level {} -> {}", back_level, expand_res->expanded_seeds);
         sl = expand_res->expanded_seeds;
       }
       timer.stop();
-      ELOGFMT(DEBUG, "Finishes expansion of seed list #{} with r = {}. Time used = {:.3f} sec.", //
-              i, n_sketches, timer.elapsed());
+      MYLOG_FMT_DEBUG("Finishes expansion of seed list #{} with r = {}. Time used = {:.3f} sec.", //
+                      i, n_sketches, timer.elapsed());
       (*json_experiments)["expanding_seeds"].push_back({{"r", n_sketches}, {"expanded_seeds", sl}});
       (*json_time_used)["expand_seeds"].push_back({{"r", n_sketches}, {"seconds", timer.elapsed()}});
     }

@@ -1,12 +1,13 @@
 #include "coarsening.h"
 #include "dump.h"
+#include "graph_connectivity.h"
 #include "playground/sample_graph.h"
-#include "utils/graph_connectivity.h"
+#include "utils/easylog.h"
 #include "utils/histogram.h"
+#include "wim.h"
 #include <fmt/ranges.h>
 #include <nwgraph/adaptors/edge_range.hpp>
 #include <nwgraph/adaptors/neighbor_range.hpp>
-#include <ylt/easylog.hpp>
 
 auto monte_carlo_simulate(const AdjacencyList<WIMEdge>& graph, const VertexSet& seeds, const VertexSet& dest,
                           uint64_t try_count) -> double {
@@ -63,11 +64,12 @@ int main() {
   ELOGFMT(INFO, "Histogram of rand_values:\n{}", make_histogram(rand_values, 100, 20));
 
   auto [graph, inv_graph] = make_sample_wim_graph_1();
-  auto coarsening_params = CoarseningParams{.neighbor_match_rule = NeighborMatchRule::HEM_P_MAX,
-                                            .edge_weight_rule = EdgeWeightRule::SEPARATE_PRECISE,
-                                            .in_out_heuristic_rule = InOutHeuristicRule::P,
-                                            .vertex_weight_rule = VertexWeightRule::AVERAGE_BY_PATHS,
-                                            .seed_merging_rule = SeedMergingRule::SINGLE};
+  auto coarsening_params = CoarseningParams{.neighbor_match_rule = NeighborMatchRule::LEM_P_PRODUCT,
+                                            .edge_weight_rule = EdgeWeightRule::SEPARATE_SIMPLE,
+                                            .edge_seed_weight_rule = EdgeSeedWeightRule::BEST_SEED_INDEX,
+                                            .in_out_heuristic_rule = InOutHeuristicRule::COUNT,
+                                            .vertex_weight_rule = VertexWeightRule::AVERAGE,
+                                            .seed_merging_rule = SeedMergingRule::UNUSED};
   auto expanding_params = ExpandingParams{
       .seed_expanding_rule = SeedExpandingRule::ITERATIVE, .n_iterations = 5, .simulation_try_count = 5};
 
@@ -87,6 +89,7 @@ int main() {
   }();
   auto n_groups = 4;
   auto group_id = std::vector<vertex_id_t>{0, 1, 2, 0, 1, 2, 0, 1, 2, 3};
+  // auto [n_groups, group_id] = mongoose_match(bidir_graph, coarsening_params);
 
   auto brief_res = coarsen_wim_graph_with_match_result_w( //
       graph, inv_graph, vertex_weights, n_groups, group_id, coarsening_params);

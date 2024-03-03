@@ -42,13 +42,3 @@ inline auto dump_as_json_generic(const T& value) noexcept -> json {
 
 DUMP_REGISTERED_TYPES_AUTO_GENERATED(IMPLEMENT_DUMP_FUNCTIONS_AUTO)
 #undef IMPLEMENT_DUMP_FUNCTIONS_AUTO
-
-// ---- Manual implementation ----
-
-#define IMPLEMENT_DUMP_FUNCTIONS_MANUAL(Type)                        \
-  auto dump(const Type& value, int indent) noexcept -> std::string { \
-    return value.dump(indent);                                       \
-  }
-
-DUMP_REGISTERED_TYPES_MANUAL_IMPLEMENTED(IMPLEMENT_DUMP_FUNCTIONS_MANUAL)
-#undef IMPLEMENT_DUMP_FUNCTIONS_MANUAL

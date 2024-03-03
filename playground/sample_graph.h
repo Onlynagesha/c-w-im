@@ -9,7 +9,7 @@ using EdgeTuple = std::tuple<vertex_id_t, vertex_id_t, edge_probability_t>;
 inline const auto SAMPLE_EDGES_1 = std::vector<EdgeTuple>{
     {0, 1, 0.30}, {1, 2, 0.31}, {3, 4, 0.32}, {4, 5, 0.33}, {6, 7, 0.34}, {7, 8, 0.35}, {0, 3, 0.41},
     {3, 6, 0.44}, {1, 4, 0.42}, {4, 7, 0.45}, {2, 5, 0.43}, {5, 8, 0.46}, {4, 1, 0.20}, {7, 4, 0.21},
-    {4, 3, 0.22}, {5, 4, 0.23}, {9, 0, 0.4},  {9, 3, 0.3},  {9, 6, 0.2}};
+    {4, 3, 0.22}, {5, 4, 0.23}, {9, 0, 0.4},  {9, 3, 0.3},  {9, 6, 0.2},  {2, 0, 0.10}, {8, 6, 0.11}};
 
 // (source, target, p)
 inline const auto SAMPLE_EDGES_1_LEFT =

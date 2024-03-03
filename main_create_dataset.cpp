@@ -1,7 +1,7 @@
 #include "create_dataset.h"
 #include "dump.h"
+#include "utils/easylog.h"
 #include <fmt/ranges.h>
-#include <ylt/easylog.hpp>
 
 #define VERIFY_CHECK(expr1, expr2)                                      \
   do {                                                                  \
@@ -46,7 +46,7 @@ auto main_worker(int argc, char** argv) -> ResultVoid try {
     for (auto [u, v, w] : graph.edge_list | views::take(PREVIEW_COUNT)) {
       preview_str += fmt::format("\n\t{} -> {}: properties = {}", u, v, w);
     }
-    ELOG_DEBUG << preview_str;
+    MYLOG_DEBUG(preview_str);
 
     return write_directed_wim_edge_list_r(graph, params.output_file).and_then([&](auto) -> ResultVoid {
       constexpr auto msg_pattern = "Successfully serializes dataset from input '{}' to output '{}'.";

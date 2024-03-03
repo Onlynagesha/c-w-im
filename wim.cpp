@@ -1,6 +1,6 @@
 #include "wim.h"
+#include "utils/easylog.h"
 #include <fmt/ranges.h>
-#include <ylt/easylog.hpp>
 
 namespace {
 template <is_edge_property E, same_as_either<VertexSet, std::nullptr_t> BoostedSet, class VertexWeights>
@@ -60,12 +60,12 @@ auto wim_simulate_generic(const AdjacencyList<E>& graph, const VertexSet& seeds,
     }
     // Excluding the seeds themselves to prevent O(try_count * s) redundant calculation.
     auto non_seed_sum = accumulate_sum(queue | views::drop(s) | vid_to_weight, 0.0);
-    ELOGFMT(TRACE, "Simulation #{}: score excluding seeds = {}, queue = {}", try_index, non_seed_sum, queue);
+    MYLOG_FMT_TRACE("Simulation #{}: score excluding seeds = {}, queue = {}", try_index, non_seed_sum, queue);
     sum += non_seed_sum;
   }
   // Result = Total vertex weight of seeds + Average of total BFS-traversed vertex weight excluding seeds
   auto seed_sum = accumulate_sum(seeds.vertex_list | vid_to_weight, 0.0);
-  ELOGFMT(DEBUG, "Total weight of seed vertices = {}, with # of seeds = {}", seed_sum, seeds.vertex_list.size());
+  MYLOG_FMT_DEBUG("Total weight of seed vertices = {}, with # of seeds = {}", seed_sum, seeds.vertex_list.size());
   return accumulate_sum(seeds.vertex_list | vid_to_weight, 0.0) + (sum / try_count);
 }
 } // namespace
@@ -101,7 +101,7 @@ auto RRSketchSet::append(size_t n_sketches) noexcept -> void {
     auto center = center_distribution(rand_engine);
     bfs_initialize(queue, vis, center);
     bfs_initialize(queue_ext, vis_ext, center);
-    ELOGFMT(TRACE, "Selects vertex #{} as the center of next RR-sketch.", center);
+    MYLOG_FMT_TRACE("Selects vertex #{} as the center of next RR-sketch.", center);
 
     for (auto i = 0zu; i < queue.size(); i++) {
       auto cur = queue[i];
@@ -133,13 +133,13 @@ auto RRSketchSet::select(vertex_id_t k) noexcept -> std::vector<vertex_id_t> {
   auto res = std::vector<vertex_id_t>{};
   res.reserve(k);
 
-  ELOGFMT(TRACE, "Details of current RRSketchSet:\n{}", dump());
+  MYLOG_FMT_TRACE("Details of current RRSketchSet:\n{}", dump());
 
   for (auto i = 0_vid; i < k; i++) {
-    ELOGFMT(TRACE, "select: i = {}, cover_count = {}", i, cover_count);
+    MYLOG_FMT_TRACE("select: i = {}, cover_count = {}", i, cover_count);
     auto cur = static_cast<vertex_id_t>(ranges::max_element(cover_count) - cover_count.begin());
     res.push_back(cur);
-    ELOGFMT(TRACE, "Selects vertex #{} with cover_count = {}", cur, cover_count[cur]);
+    MYLOG_FMT_TRACE("Selects vertex #{} with cover_count = {}", cur, cover_count[cur]);
     BOOST_ASSERT_MSG(cover_count[cur] >= 0, "Invalid seed selected whose cover_count is negative!");
 
     cover_count[cur] = -1; // Marks as invalid
@@ -151,7 +151,7 @@ auto RRSketchSet::select(vertex_id_t k) noexcept -> std::vector<vertex_id_t> {
     }
   }
   auto cover_percentage = 100.0 * covered.count() / num_sketches();
-  ELOGFMT(DEBUG, "Done selecting {} seed vertices. {:.3f}% of RR-sketch covered.", k, cover_percentage);
+  MYLOG_FMT_DEBUG("Done selecting {} seed vertices. {:.3f}% of RR-sketch covered.", k, cover_percentage);
   return res;
 }
 

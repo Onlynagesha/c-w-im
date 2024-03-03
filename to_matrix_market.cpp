@@ -1,11 +1,11 @@
 #include "to_matrix_market.h"
 #include "utils/boost_assert.h"
+#include "utils/easylog.h"
 #include "utils/graph.h"
 #include "utils/utils.h"
 #include <fmt/format.h>
 #include <fstream>
 #include <map>
-#include <ylt/easylog.hpp>
 
 namespace {
 constexpr auto NUM_PREVIEW_LINES = 10;
@@ -113,8 +113,8 @@ auto graph_text_to_matrix_market(const ToMatrixMarketParams& params) -> ResultVo
   }
   // Output the MatrixMarket text file
   auto mm_text = dump_as_matrix_market_text(index_map.size(), mapped_edges, is_undirected);
-  ELOGFMT(DEBUG, "The first {} lines of Matrix Market output:\n{}", NUM_PREVIEW_LINES,
-          first_lines(mm_text, NUM_PREVIEW_LINES));
+  MYLOG_FMT_DEBUG("The first {} lines of Matrix Market output:\n{}", NUM_PREVIEW_LINES,
+                  first_lines(mm_text, NUM_PREVIEW_LINES));
   fout.write(mm_text.c_str(), mm_text.length());
 
   return RESULT_VOID_SUCCESS;

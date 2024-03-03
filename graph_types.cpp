@@ -1,7 +1,7 @@
 #include "graph_types.h"
+#include "utils/easylog.h"
 #include <fmt/format.h>
 #include <nameof.hpp>
-#include <ylt/easylog.hpp>
 
 namespace {
 template <is_edge_property E>
@@ -29,8 +29,8 @@ auto read_directed_edge_list_generic(const std::string& input_file) noexcept -> 
   // Part 1: Type header
   constexpr auto expected_header = serialization_header_chars<E>();
   constexpr auto header_length = expected_header.size();
-  ELOGFMT(DEBUG, "Expects header '{}' as type identifier of the graph to be deserialized.",
-          std::string_view{expected_header.data(), header_length});
+  MYLOG_FMT_DEBUG("Expects header '{}' as type identifier of the graph to be deserialized.",
+                  std::string_view{expected_header.data(), header_length});
 
   auto header_buffer = std::array<char, header_length>{};
   fin.read(header_buffer.data(), header_length);
@@ -41,7 +41,7 @@ auto read_directed_edge_list_generic(const std::string& input_file) noexcept -> 
   // Part 2: Size header: n = # of vertices
   vertex_id_t n;
   fin.read(reinterpret_cast<char*>(&n), sizeof(vertex_id_t));
-  ELOGFMT(DEBUG, "In header of input file: n = {}", n);
+  MYLOG_FMT_DEBUG("In header of input file: n = {}", n);
   // Part 3: Vertex weights
   auto vertex_weights = std::vector<vertex_weight_t>(n);
   fin.read(reinterpret_cast<char*>(vertex_weights.data()), sizeof(vertex_weight_t) * n);
@@ -72,8 +72,8 @@ auto write_directed_edge_list_generic(const DirectedEdgeList<E>& graph, std::spa
   }
 
   constexpr auto header = serialization_header_chars<E>();
-  ELOGFMT(DEBUG, "Using header '{}' as type identifier of serialized graph.",
-          std::string_view{header.data(), header.size()});
+  MYLOG_FMT_DEBUG("Using header '{}' as type identifier of serialized graph.",
+                  std::string_view{header.data(), header.size()});
   // Part 1: Type header
   fout.write(header.data(), header.size());
   // Part 2: Size header, n = # of vertices

@@ -34,10 +34,8 @@ set(COMMON_INCLUDE_DIRS
 set(COMMON_SOURCE_FILES
     ${THIRD_PARTY_SOURCE_FILES}
     argparse.cpp
-    coarsening.cpp
     dump.cpp
     graph_types.cpp
-    wim.cpp
     )
 set(COMMON_LINK_LIBRARIES
     argparse::argparse
@@ -51,6 +49,7 @@ set(COMMON_LINK_LIBRARIES
 add_executable(wim-experiment
     main_wim_experiment.cpp
     coarsening.cpp
+    coarsening_dump.cpp
     experiments.cpp
     wim.cpp
     ${COMMON_SOURCE_FILES})
@@ -58,6 +57,7 @@ add_executable(wim-experiment
 add_executable(wim-coarsening-experiment
     main_wim_coarsening_experiment.cpp
     coarsening.cpp
+    coarsening_dump.cpp
     experiments.cpp
     wim.cpp
     ${COMMON_SOURCE_FILES})
@@ -73,13 +73,21 @@ add_executable(to-matrix-market
     ${COMMON_SOURCE_FILES})
 
 add_executable(playground
-    playground/mongoose_matching.cpp
+    playground/coarsening.cpp
     coarsening.cpp
+    coarsening_dump.cpp
     wim.cpp
     ${COMMON_SOURCE_FILES})
+target_compile_definitions(playground PRIVATE ENABLES_MYLOG_TRACE)
 
 foreach(target wim-experiment wim-coarsening-experiment create-dataset to-matrix-market playground)
     target_compile_definitions(${target} PRIVATE ${COMMON_COMPILE_DEFINITIONS})
     target_include_directories(${target} PRIVATE ${COMMON_INCLUDE_DIRS})
-target_link_libraries(${target} PRIVATE ${COMMON_LINK_LIBRARIES})
+    target_link_libraries(${target} PRIVATE ${COMMON_LINK_LIBRARIES})
+
+    # AddressSanitizer checking for debug mode
+    if (CMAKE_BUILD_TYPE AND (CMAKE_BUILD_TYPE STREQUAL "Debug"))
+        target_compile_options(${target} PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+        target_link_libraries(${target} PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+    endif ()
 endforeach()

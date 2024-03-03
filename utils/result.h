@@ -1,7 +1,6 @@
 #pragma once
 
 #include "utils/demangle.h"
-#include <execinfo.h>
 #include <fmt/format.h>
 #include <rfl/Result.hpp>
 

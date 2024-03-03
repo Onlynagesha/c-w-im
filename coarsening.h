@@ -9,13 +9,25 @@
 #include <rfl/Validator.hpp>
 #include <rfl/comparisons.hpp>
 
+#define COARSENING_DETAILS_TYPES(F) \
+  F(CoarsenedVertexBrief)           \
+  F(CoarsenedVertexDetails)         \
+  F(CoarsenedEdgeDetails)           \
+  F(CoarseningBrief)                \
+  F(CoarseningDetails)              \
+  F(CoarsenGraphBriefResult)        \
+  F(CoarsenGraphDetailedResult)
+
+#define DECLARE_FREE_DUMP_FUNCTION_FOR_COARSENING_DETAILS(Type) \
+  auto dump(const Type& obj, int indent = 0, int level = 0) noexcept -> std::string;
+
 enum class NeighborMatchRule { HEM_P_MAX, HEM_P_PRODUCT, LEM_P_MAX, LEM_P_PRODUCT };
 
 enum class EdgeWeightRule { SEPARATE_SIMPLE, MERGED_SIMPLE, SEPARATE_PRECISE, MERGED_PRECISE };
 
 enum class EdgeSeedWeightRule { AVERAGE, MAX, BEST_SEED_INDEX };
 
-enum class InOutHeuristicRule { NONE, P, W };
+enum class InOutHeuristicRule { UNIT, COUNT, P, W };
 
 enum class VertexWeightRule { AVERAGE, AVERAGE_BY_PATHS, SUM };
 // C-w-BIM only
@@ -312,7 +324,8 @@ struct SelectBestSeedResult {
   size_t index_in_group;
 };
 
-auto select_best_seed_in_group(const CoarsenedVertexDetails& v) noexcept -> SelectBestSeedResult;
+auto select_best_seed_in_group(const CoarsenedVertexDetails& v, InOutHeuristicRule rule) noexcept
+    -> SelectBestSeedResult;
 
 struct ExpandSeedResult {
   std::vector<vertex_id_t> expanded_seeds;
@@ -346,3 +359,9 @@ auto further_expand_wim_seed_vertices_d(const CoarsenGraphDetailedResult& last_r
                                         const CoarsenGraphDetailedResult& cur_result,
                                         std::span<const vertex_id_t> coarsened_seeds,
                                         const ExpandingParams& params) noexcept -> rfl::Result<ExpandSeedResult>;
+
+// ---- Free functions for dumping ----
+
+COARSENING_DETAILS_TYPES(DECLARE_FREE_DUMP_FUNCTION_FOR_COARSENING_DETAILS)
+
+#undef DECLARE_FREE_DUMP_FUNCTION_FOR_COARSENING_DETAILS

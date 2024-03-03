@@ -7,7 +7,6 @@
 #include <rfl/Size.hpp>
 #include <rfl/Validator.hpp>
 #include <rfl/comparisons.hpp>
-#include <ylt/easylog/record.hpp>
 
 template <class E>
 struct AdjacencyListPair {
