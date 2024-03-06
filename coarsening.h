@@ -1,7 +1,6 @@
 #pragma once
 
 #include "graph_types.h"
-#include "utils/flat_map.h"
 #include "utils/result.h"
 #include "utils/static_vector.h"
 #include <array>
@@ -189,9 +188,6 @@ struct CoarseningBrief {
 };
 
 struct CoarseningDetails {
-  using VertexPair = std::pair<vertex_id_t, vertex_id_t>;
-  using EdgeDetailsMap = FlatMap<VertexPair, CoarsenedEdgeDetails>;
-
   // N, # of vertices before coarsening
   vertex_id_t n;
   // Nc, # of vertices in the coarsened graph.
@@ -204,8 +200,6 @@ struct CoarseningDetails {
   std::vector<vertex_id_t> index_in_group;
   // List of size Nc. groups[g] represents the group {v1, v2, v3} whose group index is g.
   std::vector<CoarsenedVertexDetails> groups;
-  // Map from vertex pair (u, v) to coarsened edge details, where 0 <= u, v < Nc
-  EdgeDetailsMap edges;
 
   auto dump(int indent = 0, int level = 0) const noexcept -> std::string;
 
@@ -242,6 +236,12 @@ public:
   auto to_group_size(Args... vertex_indices) const {
     auto get_fn = LAMBDA_1(groups[group_id[_1]].n_members());
     return to_get_fn_result_generic(get_fn, vertex_indices...);
+  }
+
+  template <std::convertible_to<vertex_id_t>... Args>
+  auto group_id_to_size(Args... group_indices) const {
+    auto get_fn = LAMBDA_1(groups[_1].n_members());
+    return to_get_fn_result_generic(get_fn, group_indices...);
   }
 };
 

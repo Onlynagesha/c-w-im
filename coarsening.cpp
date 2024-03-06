@@ -7,6 +7,9 @@
 
 namespace {
 constexpr auto MAX_N_MEMBERS = CoarsenedVertexDetails::MAX_N_MEMBERS;
+constexpr auto P_NOT_ASSIGNED = -1.0_ep;
+
+using VertexPair = std::pair<vertex_id_t, vertex_id_t>;
 
 auto merge_p(edge_probability_t e1, edge_probability_t e2, NeighborMatchRule rule) -> edge_probability_t {
   switch (rule) {
@@ -55,16 +58,6 @@ auto is_better_p(edge_probability_t before, edge_probability_t after, NeighborMa
   }
 }
 
-constexpr auto P_NOT_ASSIGNED = -1.0_ep;
-
-auto make_initial_coarsened_edge_details(size_t n_members_left, size_t n_members_right) -> CoarsenedEdgeDetails {
-  return {.n_members_left = n_members_left,
-          .n_members_right = n_members_right,
-          .p_cross = {},
-          .p_seed_cross = {},
-          .merged = {.p = P_NOT_ASSIGNED, .p_seed = P_NOT_ASSIGNED}};
-}
-
 template <size_t N, size_t... Is>
   requires(N >= 2)
 constexpr auto get_next_j_helper(size_t j0, std::index_sequence<Is...>) {
@@ -82,39 +75,88 @@ constexpr auto get_next_j(size_t j0) {
   return get_next_j_helper<N>(j0, make_index_sequence_by_offset<N - 1, 1>{});
 }
 
+template <class T>
+struct VertexPairWithValue {
+  vertex_id_t u;
+  vertex_id_t v;
+  [[no_unique_address]] T value;
+
+  auto vertices() const {
+    return std::tuple{u, v};
+  }
+};
+
+template <class T>
+auto radix_sort_vertex_pairs(std::span<VertexPairWithValue<T>> vertex_pairs, vertex_id_t n) -> void {
+  auto m = vertex_pairs.size();
+  auto count = std::vector<vertex_id_t>(n);
+  auto temp = std::vector<VertexPairWithValue<T>>(m);
+  MYLOG_FMT_TRACE("vertex_pairs before radix sorting: {}", vertex_pairs | TRANSFORM_VIEW(std::pair{_1.u, _1.v}));
+  // Step 1: Sorts by v, vertex_pairs -> temp
+  for (const auto& item : vertex_pairs) {
+    BOOST_ASSERT_MSG(item.u < n && item.v < n, "v is out of range [0, n).");
+    count[item.v] += 1;
+  }
+  std::exclusive_scan(count.begin(), count.end(), count.begin(), 0);
+  for (const auto& item : vertex_pairs) {
+    temp[count[item.v]] = item;
+    count[item.v] += 1;
+  }
+  MYLOG_FMT_TRACE("vertex_pairs after radix sorting step 1: {}", temp | TRANSFORM_VIEW(std::pair{_1.u, _1.v}));
+  // Step 2: Sorts by u, temp -> vertex_pairs
+  ranges::fill(count, 0);
+  for (const auto& item : temp) {
+    count[item.u] += 1;
+  }
+  std::exclusive_scan(count.begin(), count.end(), count.begin(), 0);
+  for (const auto& item : temp) {
+    vertex_pairs[count[item.u]] = item;
+    count[item.u] += 1;
+  }
+  MYLOG_FMT_TRACE("vertex_pairs after radix sorting step 2: {}", //
+                  vertex_pairs | TRANSFORM_VIEW(std::pair{_1.u, _1.v}));
+  BOOST_ASSERT_MSG(ranges::is_sorted(vertex_pairs | TRANSFORM_VIEW(std::pair{_1.u, _1.v})), //
+                   "Implementation error: Not sorted correctly.");
+}
+
+template <class Range>
+auto radix_sort_vertex_pairs(Range& vertex_pairs, vertex_id_t n) {
+  radix_sort_vertex_pairs(std::span{vertex_pairs.begin(), vertex_pairs.end()}, n);
+}
+
 template <is_edge_property E>
 auto merge_edge_to_undirected_generic(AdjacencyList<E>& graph, const CoarseningParams& params)
     -> AdjacencyList<edge_probability_t> {
-  using VertexPair = std::pair<vertex_id_t, vertex_id_t>;
-  // Step 1: Builds edge map
-  auto edges_map = [&]() -> FlatMap<VertexPair, edge_probability_t> {
-    auto e_pairs = make_reserved_vector<VertexPair>(graph.num_edges());
-    for (auto [u, v] : graph::make_edge_range<>(graph)) {
-      if (u == v) {
-        continue; // Skips self-loops
-      }
-      (u < v) ? e_pairs.push_back({u, v}) : e_pairs.push_back({v, u});
-    }
-    ranges::sort(e_pairs);
-    auto n_unique = e_pairs.size() - ranges::unique(e_pairs).size();
-    auto view = e_pairs | views::take(n_unique) | TRANSFORM_VIEW(std::pair{_1, 0.0_ep});
-    return {boost::container::ordered_unique_range, view.begin(), view.end()};
-  }();
-  // Step 2: Merges edge weight p
+  using ItemType = VertexPairWithValue<edge_probability_t>;
+  auto e_pairs = make_reserved_vector<ItemType>(graph.num_edges() + 1);
   for (auto [u, v, w] : graph::make_edge_range<0>(graph)) {
     if (u == v) {
       continue; // Skips self-loops
     }
-    auto it = (u < v) ? edges_map.find({u, v}) : edges_map.find({v, u});
-    BOOST_ASSERT(it != edges_map.end());
-    it->second = merge_p(it->second, w.p, params.neighbor_match_rule);
+    (u < v) ? e_pairs.push_back({u, v, w.p}) : e_pairs.push_back({v, u, w.p});
   }
-  // Step 3: Builds the edge list & adjacency list
+  radix_sort_vertex_pairs(e_pairs, graph::num_vertices(graph));
+  e_pairs.push_back({static_cast<vertex_id_t>(-1), static_cast<vertex_id_t>(-1), 0.0_ep}); // Dummy end
+
+  constexpr auto check_duplication = [](std::span<const ItemType> items) {
+    auto chunks = items | views::chunk_by(LAMBDA_2(_1.u == _2.u && _1.v == _2.v));
+    return ranges::max(chunks | views::transform(ranges::size)) <= 2;
+  };
+  BOOST_ASSERT_MSG(check_duplication(e_pairs), "Unexpected input data: duplicated edge detected.");
+
   // Ensures |V| is unchanged
   auto edge_list = UndirectedEdgeList<edge_probability_t>{graph::num_vertices(graph)};
   edge_list.open_for_push_back();
-  for (auto [v_pair, p] : edges_map) {
-    edge_list.push_back(get<0>(v_pair), get<1>(v_pair), p);
+  auto e_pairs_adj = e_pairs | views::adjacent<2>;
+  for (auto it = e_pairs_adj.begin(); it != e_pairs_adj.end();) {
+    const auto& [p1, p2] = *it;
+    if (p1.u == p2.u && p1.v == p2.v) {
+      edge_list.push_back(p1.u, p1.v, merge_p(p1.value, p2.value, params.neighbor_match_rule));
+      it += 2; // Merges (p1, p2)
+    } else {
+      edge_list.push_back(p1.u, p1.v, p1.value);
+      it += 1; // p1 only
+    }
   }
   edge_list.close_for_push_back();
   return AdjacencyList<edge_probability_t>{edge_list};
@@ -450,48 +492,90 @@ auto merge_coarsened_wim_graph_edge(CoarsenedEdgeDetails& dest, const CoarsenedE
   dest.merged.p_seed = std::clamp(dest.merged.p_seed, dest.merged.p, 1.0_ep);
 }
 
+// If is_inverse, then the edge source -> target is mapped to Gv -> Gu
+// Otherwise, the edge source -> target is mapped to Gu -> Gv
+struct EdgeCoarseningItemInfo {
+  bool is_inverse;
+  vertex_id_t source;
+  vertex_id_t target;
+  WIMEdge w;
+
+  auto dump() const {
+    constexpr auto msg_pattern = "{{.is_inverse = {}, .source = {}, .target = {}, "
+                                 ".w.p = {:.4f}, .w.p_seed = {:.4f}}}";
+    return fmt::format(msg_pattern, is_inverse, source, target, w.p, w.p_seed);
+  }
+};
+
 auto get_coarsened_wim_graph_edges(AdjacencyList<WIMEdge>& graph, const CoarseningDetails& details,
-                                   const CoarseningParams& params) -> CoarseningDetails::EdgeDetailsMap {
-  // Step 1: Builds flat map
-  auto res = [&]() -> CoarseningDetails::EdgeDetailsMap {
-    auto g_pairs = make_reserved_vector<CoarseningDetails::VertexPair>(graph.num_edges());
-    for (auto [u, v] : graph::make_edge_range<>(graph)) {
-      auto [gu, gv] = details.to_group_id(u, v);
-      if (gu != gv) {
-        g_pairs.push_back({gu, gv}); // Skips self-loops
-      }
-    }
-    ranges::sort(g_pairs);
-    auto n_unique = g_pairs.size() - ranges::unique(g_pairs).size();
-    auto view = g_pairs | views::take(n_unique) | views::transform([&](auto g_pair) {
-                  auto [gu, gv] = g_pair;
-                  auto Mu = details.groups[gu].n_members();
-                  auto Mv = details.groups[gv].n_members();
-                  return std::pair{g_pair, make_initial_coarsened_edge_details(Mu, Mv)};
-                });
-    return {boost::container::ordered_unique_range, view.begin(), view.end()};
-  }();
-  // Step 2: Builds p_cross relations
+                                   const CoarseningParams& params) -> DirectedEdgeList<WIMEdge> {
+  using ItemInfo = EdgeCoarseningItemInfo;
+  using ItemType = VertexPairWithValue<const ItemInfo*>;
+
+  auto m = graph.num_edges();
+  auto item_info_values = make_reserved_vector<ItemInfo>(m);
+  auto items = make_reserved_vector<ItemType>(m);
+
   for (auto [u, v, w] : graph::make_edge_range<0>(graph)) {
     auto [gu, gv] = details.to_group_id(u, v);
     if (gu == gv) {
-      continue; // Skips self-loops
+      continue; // Skips the in-group edges
     }
-    auto it = res.find({gu, gv});
-    BOOST_ASSERT(it != res.end());
-    auto [ju, jv] = details.to_index_in_group(u, v);
-    it->second.p_cross[ju][jv] = w.p;
-    it->second.p_seed_cross[ju][jv] = w.p_seed;
+    if (gu < gv) {
+      auto pos = &item_info_values.emplace_back(ItemInfo{.is_inverse = false, .source = u, .target = v, .w = w});
+      items.push_back(ItemType{.u = gu, .v = gv, .value = pos});
+    } else {
+      auto pos = &item_info_values.emplace_back(ItemInfo{.is_inverse = true, .source = u, .target = v, .w = w});
+      items.push_back(ItemType{.u = gv, .v = gu, .value = pos});
+    }
   }
-  // Step 3: gets merged p and p_boost
-  for (auto& [key, dest] : res) {
-    auto [gu, gv] = key;
-    auto inv_dest = [&]() -> const CoarsenedEdgeDetails* {
-      auto it = res.find({gv, gu});
-      return it == res.end() ? nullptr : &it->second;
-    }();
-    merge_coarsened_wim_graph_edge(dest, inv_dest, details.groups[gu], details.groups[gv], params);
+  radix_sort_vertex_pairs(items, details.n_coarsened);
+  MYLOG_TRACE([&]() {
+    auto str = "Items after radix sorting: ["s;
+    for (const auto& item : items) {
+      str += fmt::format("\n\t{{.u = {}, .v = {}, .value -> {}}}", item.u, item.v, item.value->dump());
+    }
+    str += "\n]";
+    return str;
+  }());
+
+  auto res = DirectedEdgeList<WIMEdge>{details.n_coarsened}; // Keeps coarsened |V| unchanged
+  res.open_for_push_back();
+  // Each chunk represents all the edges of Gu -> Gv (is_inverse == false) and Gv -> Gu (is_inverse == true)
+  for (auto chunk : items | CHUNK_BY_VIEW(_1.u == _2.u && _1.v == _2.v)) {
+    auto [gu, gv] = chunk[0].vertices();
+    auto [Mu, Mv] = details.group_id_to_size(gu, gv);
+    auto E_uv = CoarsenedEdgeDetails{.n_members_left = Mu, .n_members_right = Mv}; // Gu -> Gv
+    auto E_vu = CoarsenedEdgeDetails{.n_members_left = Mv, .n_members_right = Mu}; // Gv -> Gu
+
+    auto has_uv = false;
+    auto has_vu = false;
+    for (auto info : chunk | views::transform(&ItemType::value)) {
+      auto [j_source, j_target] = details.to_index_in_group(info->source, info->target);
+      if (info->is_inverse) {
+        // The edge source -> target is mapped to Gv -> Gu
+        E_vu.p_cross[j_source][j_target] = info->w.p;
+        E_vu.p_seed_cross[j_source][j_target] = info->w.p_seed;
+        has_vu = true;
+      } else {
+        // The edge source -> target is mapped to Gu -> Gv
+        E_uv.p_cross[j_source][j_target] = info->w.p;
+        E_uv.p_seed_cross[j_source][j_target] = info->w.p_seed;
+        has_uv = true;
+      }
+    }
+    if (has_uv) {
+      merge_coarsened_wim_graph_edge(E_uv, &E_vu, details.groups[gu], details.groups[gv], params);
+      res.push_back(gu, gv, E_uv.merged);
+      MYLOG_FMT_TRACE("Details of coarsened edge {} -> {}: {:4}", gu, gv, E_uv);
+    }
+    if (has_vu) {
+      merge_coarsened_wim_graph_edge(E_vu, &E_uv, details.groups[gv], details.groups[gu], params);
+      res.push_back(gv, gu, E_vu.merged);
+      MYLOG_FMT_TRACE("Details of coarsened edge {} -> {}: {:4}", gv, gu, E_vu);
+    }
   }
+  res.close_for_push_back();
   return res;
 }
 
@@ -603,23 +687,15 @@ auto coarsen_wim_graph_w_impl(AdjacencyList<WIMEdge>& graph, InvAdjacencyList<WI
       g.best_seed_index = select_best_seed_in_group(g, params.in_out_heuristic_rule).index_in_group;
     }
   });
-  // Step 4: Generates coarsened edges
-  step_block(4, "coarsening edge weights", [&]() { //
-    details.edges = get_coarsened_wim_graph_edges(graph, details, params);
-  });
-  // Step 5: Generates coarsened vertex weights
+  // Step 4: Generates coarsened vertex weights
   auto coarsened_vertex_weights = std::vector<vertex_weight_t>{};
-  step_block(5, "coarsening vertex weights", [&]() {
+  step_block(4, "coarsening vertex weights", [&]() {
     coarsened_vertex_weights = get_coarsened_wim_graph_vertex_weights(details, vertex_weights, params);
   });
-  // Step 6: Finally, builds the result from all the components
-  auto coarsened_edge_list = DirectedEdgeList<WIMEdge>{details.n_coarsened};
-  step_block(6, "building coarsened edge list", [&]() {
-    coarsened_edge_list.open_for_push_back();
-    for (const auto& [p, w] : details.edges) {
-      coarsened_edge_list.push_back(get<0>(p), get<1>(p), w.merged);
-    }
-    coarsened_edge_list.close_for_push_back();
+  // Step 5: Finally, builds the result from all the components
+  auto coarsened_edge_list = DirectedEdgeList<WIMEdge>{};
+  step_block(5, "building coarsened edge list", [&]() {
+    coarsened_edge_list = get_coarsened_wim_graph_edges(graph, details, params);
     BOOST_ASSERT_MSG(graph::num_vertices(coarsened_edge_list) == details.n_coarsened,
                      "Mismatch between expected and actual # of coarsened vertices.");
   });

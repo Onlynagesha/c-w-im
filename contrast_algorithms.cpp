@@ -27,7 +27,7 @@ auto wim_pagerank(const AdjacencyList<WIMEdge>& graph, const InvAdjacencyList<WI
     // Otherwise, c(v) 1.0 for each vertex
     return std::tuple{std::vector<edge_probability_t>(n, 1.0), static_cast<edge_probability_t>(n)};
   }();
-  MYLOG_FMT_TRACE("PR(0) = {}", res);
+  MYLOG_FMT_TRACE("PR(0) = {::.4f}", res);
   // L(v) = (weighted) out-degree of v
   auto total_d_out = [&]() {
     if (params.uses_edge_weight) {
@@ -54,7 +54,7 @@ auto wim_pagerank(const AdjacencyList<WIMEdge>& graph, const InvAdjacencyList<WI
                 (1.0_ep - *params.damping_factor) * (params.uses_vertex_weight ? vertex_weights[v] : 1.0_ep);
     }
     res.swap(temp); // res <- temp
-    MYLOG_FMT_TRACE("PR({}) = {}", iteration_index + 1, res);
+    MYLOG_FMT_TRACE("PR({}) = {::.4f}", iteration_index + 1, res);
   }
   return res;
 }

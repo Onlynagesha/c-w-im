@@ -1,4 +1,5 @@
 #include "coarsening.h"
+#include "contrast_algorithms.h"
 #include "dump.h"
 #include "graph_connectivity.h"
 #include "playground/sample_graph.h"
@@ -60,14 +61,30 @@ auto monte_carlo_test(const AdjacencyList<WIMEdge>& graph) {
 int main() {
   easylog::set_min_severity(easylog::Severity::TRACE);
 
-  auto rand_values = range(1'000'000) | TRANSFORM_VIEW(rand_float());
-  ELOGFMT(INFO, "Histogram of rand_values:\n{}", make_histogram(rand_values, 100, 20));
-
   auto [graph, inv_graph] = make_sample_wim_graph_1();
+  auto vertex_weights = [&]() {
+    auto view = views::iota(vertex_id_t{10}, vertex_id_t{10} + graph::num_vertices(graph));
+    return std::vector<vertex_weight_t>(view.begin(), view.end());
+  }();
+
+  // Testing Pagerank
+  ELOG_INFO << "Testing Pagerank:";
+  auto pagerank = wim_pagerank(graph, inv_graph, vertex_weights,
+                               {.n_iterations = 1, .uses_vertex_weight = false, .uses_edge_weight = false});
+  ELOG_INFO << "Testing Pagerank(v)";
+  auto pagerank_v = wim_pagerank(graph, inv_graph, vertex_weights,
+                                 {.n_iterations = 1, .uses_vertex_weight = true, .uses_edge_weight = false});
+  ELOG_INFO << "Testing Pagerank(w)";
+  auto pagerank_w = wim_pagerank(graph, inv_graph, vertex_weights,
+                                 {.n_iterations = 1, .uses_vertex_weight = false, .uses_edge_weight = true});
+  ELOG_INFO << "Testing Pagerank(v, w)";
+  auto pagerank_v_w = wim_pagerank(graph, inv_graph, vertex_weights,
+                                   {.n_iterations = 1, .uses_vertex_weight = true, .uses_edge_weight = true});
+
   auto coarsening_params = CoarseningParams{.neighbor_match_rule = NeighborMatchRule::LEM_P_PRODUCT,
                                             .edge_weight_rule = EdgeWeightRule::SEPARATE_SIMPLE,
                                             .edge_seed_weight_rule = EdgeSeedWeightRule::BEST_SEED_INDEX,
-                                            .in_out_heuristic_rule = InOutHeuristicRule::COUNT,
+                                            .in_out_heuristic_rule = InOutHeuristicRule::P,
                                             .vertex_weight_rule = VertexWeightRule::AVERAGE,
                                             .seed_merging_rule = SeedMergingRule::UNUSED};
   auto expanding_params = ExpandingParams{
@@ -83,10 +100,6 @@ int main() {
     return res;
   }();
 
-  auto vertex_weights = [&]() {
-    auto view = views::iota(vertex_id_t{10}, vertex_id_t{10} + graph::num_vertices(graph));
-    return std::vector<vertex_weight_t>(view.begin(), view.end());
-  }();
   auto n_groups = 4;
   auto group_id = std::vector<vertex_id_t>{0, 1, 2, 0, 1, 2, 0, 1, 2, 3};
   // auto [n_groups, group_id] = mongoose_match(bidir_graph, coarsening_params);

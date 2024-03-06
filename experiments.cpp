@@ -12,8 +12,9 @@ using SelectedSeedLists = std::vector<std::vector<vertex_id_t>>;
 
 inline auto init_easylog(const CommonExperimentParams& params) {
   easylog::set_min_severity(params.log_severity);
+  // Note: async=true may trigger a bug that the program fails to terminate after everything is finished.
   if (!params.log_output_file.empty()) {
-    easylog::init_log(params.log_severity, params.log_output_file, true, params.log_console);
+    easylog::init_log(params.log_severity, params.log_output_file, false, params.log_console);
   }
 }
 

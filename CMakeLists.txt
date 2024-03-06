@@ -73,9 +73,10 @@ add_executable(to-matrix-market
     ${COMMON_SOURCE_FILES})
 
 add_executable(playground
-    playground/coarsening.cpp
+    playground/test_coarsening.cpp
     coarsening.cpp
     coarsening_dump.cpp
+    contrast_algorithms.cpp
     wim.cpp
     ${COMMON_SOURCE_FILES})
 target_compile_definitions(playground PRIVATE ENABLES_MYLOG_TRACE)

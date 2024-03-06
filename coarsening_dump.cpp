@@ -163,21 +163,12 @@ auto CoarseningDetails::dump(int indent, int level) const noexcept -> std::strin
     auto to_group_str = LAMBDA_1(fmt::format("[{}] = {}", _1, groups[_1].dump(indent, level + 2)));
     return merge_dumped_components(range(n_coarsened) | views::transform(to_group_str), indent, level + 1);
   }();
-  auto edges_str = [&]() {
-    auto to_edge_str = [&](const EdgeDetailsMap::value_type& pair) {
-      const auto& [v_pair, e] = pair;
-      return fmt::format("{} = {}", v_pair, e.dump(indent, level + 2));
-    };
-    return merge_dumped_components(edges | views::transform(to_edge_str), indent, level + 1);
-  }();
   auto group_id_width = static_cast<int>(std::log10(n_coarsened)) + 1;
   auto components = {
-      fmt::format(".n = {}", n),
-      fmt::format(".n_coarsened = {}", n_coarsened),
+      fmt::format(".n = {}", n), fmt::format(".n_coarsened = {}", n_coarsened),
       fmt::format(".group_id = {}", dump_array_as_braced_list(group_id, group_id_width, indent, level + 1)),
       fmt::format(".index_in_group = {}", dump_array_as_braced_list(index_in_group, 1, indent, level + 1)),
-      fmt::format(".groups = {}", groups_str),
-      fmt::format(".edges = {}", edges_str)};
+      fmt::format(".groups = {}", groups_str)};
   return merge_dumped_components(components, indent, level);
 }
 

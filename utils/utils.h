@@ -15,6 +15,7 @@
 #define LAMBDA_1(...) [&](auto&& _1) { return (__VA_ARGS__); }
 #define LAMBDA_2(...) [&](auto&& _1, auto&& _2) { return (__VA_ARGS__); }
 
+#define CHUNK_BY_VIEW(...) std::views::chunk_by(LAMBDA_2(__VA_ARGS__))
 #define FILTER_VIEW(...) std::views::filter(LAMBDA_1(__VA_ARGS__))
 #define TRANSFORM_VIEW(...) std::views::transform(LAMBDA_1(__VA_ARGS__))
 
