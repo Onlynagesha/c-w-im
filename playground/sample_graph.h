@@ -21,6 +21,9 @@ inline const auto SAMPLE_EDGES_1_RIGHT =
     std::vector<EdgeTuple>{{0, 1, 0.31}, {2, 3, 0.33}, {4, 5, 0.35},   {0, 2, 0.42},     {2, 4, 0.45},
                            {2, 0, 0.20}, {4, 2, 0.21}, {6, 0, 0.3125}, {6, 2, 0.333333}, {6, 4, 0.354167}};
 
+inline auto SAMPLE_EDGES_2 =
+    std::vector<EdgeTuple>{{1, 2, 0.3}, {1, 3, 0.4}, {3, 2, 0.5}, {2, 4, 0.6}, {3, 5, 0.7}, {4, 5, 0.8}};
+
 inline auto make_sample_wim_graph(std::span<const EdgeTuple> edges) {
   auto edge_list = DirectedEdgeList<WIMEdge>{};
   edge_list.open_for_push_back();
@@ -42,4 +45,8 @@ inline auto make_sample_wim_graph_1_left() {
 
 inline auto make_sample_wim_graph_1_right() {
   return sample_graph_details::make_sample_wim_graph(sample_graph_details::SAMPLE_EDGES_1_RIGHT);
+}
+
+inline auto make_sample_wim_graph_2() {
+  return sample_graph_details::make_sample_wim_graph(sample_graph_details::SAMPLE_EDGES_2);
 }

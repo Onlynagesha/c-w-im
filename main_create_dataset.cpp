@@ -48,7 +48,7 @@ auto main_worker(int argc, char** argv) -> ResultVoid try {
     }
     MYLOG_DEBUG(preview_str);
 
-    return write_directed_wim_edge_list_r(graph, params.output_file).and_then([&](auto) -> ResultVoid {
+    return write_directed_edge_list_r(graph, params.output_file).and_then([&](auto) -> ResultVoid {
       constexpr auto msg_pattern = "Successfully serializes dataset from input '{}' to output '{}'.";
       ELOGFMT(INFO, msg_pattern, params.input_file, params.output_file);
       // Verification for small graphs

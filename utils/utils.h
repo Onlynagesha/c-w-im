@@ -166,7 +166,7 @@ inline auto rand_element(Range&& range) -> ranges::range_value_t<std::remove_cvr
 }
 
 template <class T>
-inline constexpr auto remove_const(const T& value) -> T& {
+inline constexpr auto as_non_const(const T& value) -> T& {
   return const_cast<T&>(value);
 }
 

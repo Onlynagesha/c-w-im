@@ -58,6 +58,19 @@ auto read_directed_edge_list_generic(const std::string& input_file) noexcept -> 
 }
 
 template <is_edge_property E>
+auto read_directed_adjacency_lists_generic(const std::string& input_file) noexcept
+    -> rfl::Result<AdjacencyListPair<E>> {
+  auto read_res = read_directed_edge_list_generic<E>(input_file);
+  if (!read_res) {
+    return std::move(*read_res.error());
+  }
+  auto& edge_list = read_res->edge_list;
+  auto& vertex_weights = read_res->vertex_weights;
+  return AdjacencyListPair<E>{
+      .adj_list = {edge_list}, .inv_adj_list = {edge_list}, .vertex_weights = std::move(vertex_weights)};
+}
+
+template <is_edge_property E>
 auto write_directed_edge_list_generic(const DirectedEdgeList<E>& graph, std::span<const vertex_weight_t> vertex_weights,
                                       const std::string& output_file) noexcept -> ResultVoid {
   auto fout = std::ofstream(output_file, std::ios::binary);
@@ -92,6 +105,14 @@ auto read_directed_wim_edge_list(const std::string& input_file) noexcept -> rfl:
 
 auto read_directed_wbim_edge_list(const std::string& input_file) noexcept -> rfl::Result<WBIMReadGraphResult> {
   return read_directed_edge_list_generic<WBIMEdge>(input_file);
+}
+
+auto read_directed_wim_adjacency_lists(const std::string& input_file) noexcept -> rfl::Result<WIMAdjacencyListPair> {
+  return read_directed_adjacency_lists_generic<WIMEdge>(input_file);
+}
+
+auto read_directed_wbim_adjacency_lists(const std::string& input_file) noexcept -> rfl::Result<WBIMAdjacencyListPair> {
+  return read_directed_adjacency_lists_generic<WBIMEdge>(input_file);
 }
 
 auto write_directed_wim_edge_list(const DirectedEdgeList<WIMEdge>& graph,

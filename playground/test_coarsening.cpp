@@ -1,14 +1,10 @@
 #include "coarsening.h"
-#include "contrast_algorithms.h"
 #include "dump.h"
-#include "graph_connectivity.h"
 #include "playground/sample_graph.h"
 #include "utils/easylog.h"
-#include "utils/histogram.h"
 #include "wim.h"
 #include <fmt/ranges.h>
 #include <nwgraph/adaptors/edge_range.hpp>
-#include <nwgraph/adaptors/neighbor_range.hpp>
 
 auto monte_carlo_simulate(const AdjacencyList<WIMEdge>& graph, const VertexSet& seeds, const VertexSet& dest,
                           uint64_t try_count) -> double {
@@ -43,7 +39,7 @@ auto monte_carlo_test(const AdjacencyList<WIMEdge>& graph) {
   ELOG_INFO << [&] {
     constexpr auto msg_pattern_header = "Current graph to be tested: |V|, |E| = {}";
     auto res = fmt::format(msg_pattern_header, graph_n_m(graph));
-    for (auto [u, v, p] : graph::make_edge_range<0>(remove_const(graph))) {
+    for (auto [u, v, p] : graph::make_edge_range<0>(as_non_const(graph))) {
       res += fmt::format("\n\tu = {}, v = {}, p = {}", u, v, p);
     }
     return res;
@@ -66,20 +62,6 @@ int main() {
     auto view = views::iota(vertex_id_t{10}, vertex_id_t{10} + graph::num_vertices(graph));
     return std::vector<vertex_weight_t>(view.begin(), view.end());
   }();
-
-  // Testing Pagerank
-  ELOG_INFO << "Testing Pagerank:";
-  auto pagerank = wim_pagerank(graph, inv_graph, vertex_weights,
-                               {.n_iterations = 1, .uses_vertex_weight = false, .uses_edge_weight = false});
-  ELOG_INFO << "Testing Pagerank(v)";
-  auto pagerank_v = wim_pagerank(graph, inv_graph, vertex_weights,
-                                 {.n_iterations = 1, .uses_vertex_weight = true, .uses_edge_weight = false});
-  ELOG_INFO << "Testing Pagerank(w)";
-  auto pagerank_w = wim_pagerank(graph, inv_graph, vertex_weights,
-                                 {.n_iterations = 1, .uses_vertex_weight = false, .uses_edge_weight = true});
-  ELOG_INFO << "Testing Pagerank(v, w)";
-  auto pagerank_v_w = wim_pagerank(graph, inv_graph, vertex_weights,
-                                   {.n_iterations = 1, .uses_vertex_weight = true, .uses_edge_weight = true});
 
   auto coarsening_params = CoarseningParams{.neighbor_match_rule = NeighborMatchRule::LEM_P_PRODUCT,
                                             .edge_weight_rule = EdgeWeightRule::SEPARATE_SIMPLE,

@@ -13,7 +13,8 @@
   F(ReadGraphParams)               /* read_dataset.h */ \
   F(CoarseningParams)              /* coarsening.h */   \
   F(WIMExperimentParams)           /* experiments.h */  \
-  F(WIMCoarseningExperimentParams) /* experiments.h */
+  F(WIMCoarseningExperimentParams) /* experiments.h */  \
+  F(WIMContrastExperimentParams)   /* experiments.h */
 
 #define REGISTER_DUMP_FUNCTIONS_WITH_JSON(Type)                         \
   auto dump(const Type& value, int indent = 0) noexcept -> std::string; \

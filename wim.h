@@ -8,27 +8,6 @@
 #include <rfl/Validator.hpp>
 #include <rfl/comparisons.hpp>
 
-template <class E>
-struct AdjacencyListPair {
-  AdjacencyList<E> adj_list;
-  InvAdjacencyList<E> inv_adj_list;
-  std::vector<vertex_weight_t> vertex_weights;
-
-  auto in_degree(vertex_id_t v) const {
-    BOOST_ASSERT_MSG(v >= 0 && v < graph::num_vertices(inv_adj_list), "v is out of range [0, n).");
-    return graph::degree(inv_adj_list, v);
-  }
-
-  auto out_degree(vertex_id_t v) const {
-    BOOST_ASSERT_MSG(v >= 0 && v < graph::num_vertices(inv_adj_list), "v is out of range [0, n).");
-    return graph::degree(adj_list, v);
-  }
-
-  auto degree(vertex_id_t v) const {
-    return in_degree(v) + out_degree(v);
-  }
-};
-
 struct VertexSet {
   std::vector<vertex_id_t> vertex_list;
   DynamicBitset mask;
@@ -77,11 +56,11 @@ struct RRSketchSet {
     inv_sketches.assign(n, std::vector<size_t>{});
   }
 
-  auto num_vertices() const -> vertex_id_t {
+  auto n_vertices() const -> vertex_id_t {
     return static_cast<vertex_id_t>(inv_sketches.size());
   }
 
-  auto num_sketches() const -> size_t {
+  auto n_sketches() const -> size_t {
     return sketches.size();
   }
 
@@ -138,10 +117,6 @@ private:
   // Appends a new RR-sketch
   auto append_single(std::span<vertex_id_t> vertices) noexcept -> void;
 };
-
-auto read_wim_graph_data(const std::string& input_file) noexcept -> rfl::Result<AdjacencyListPair<WIMEdge>>;
-
-auto read_wbim_graph_data(const std::string& input_file) noexcept -> rfl::Result<AdjacencyListPair<WBIMEdge>>;
 
 auto wim_simulate(const AdjacencyList<WIMEdge>& graph, const VertexSet& seeds, uint64_t try_count) noexcept
     -> rfl::Result<double>;

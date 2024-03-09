@@ -7,7 +7,7 @@ int main(int argc, char** argv) {
         return rfl::Result{0};
       })
       .or_else([](const rfl::Error& error) {
-        ELOGFMT(CRITICAL, "WIM experiment error: `{}'", error.what());
+        ELOGFMT(CRITICAL, "WIM experiment halts due to error: `{}'", error.what());
         return rfl::Result{-1};
       })
       .value_or(-1);

@@ -62,7 +62,7 @@ auto merge_dumped_components(ComponentRange&& components, int indent, int level)
 
 template <is_edge_property E, int IsInv>
 auto dump_graph_generic(const graph::adjacency<IsInv, E>& graph, int indent, int level) -> std::string {
-  auto edge_range = graph::make_edge_range<0>(remove_const(graph));
+  auto edge_range = graph::make_edge_range<0>(as_non_const(graph));
   auto components = make_reserved_vector<std::string>(graph.num_edges());
   for (auto [u, v, w] : edge_range) {
     components.push_back(fmt::format("({}, {}): {}", u, v, w));
@@ -74,14 +74,17 @@ template <class CoarseningDetailsType>
 auto dump_impl(const CoarsenGraphResult<CoarseningDetailsType>& result_obj, int indent, int level) -> std::string {
   constexpr auto DECIMAL_DIGITS = 4;
   auto weights_width = // 1 : One position for the decimal point '.'
-      static_cast<int>(std::log10(ranges::max(result_obj.coarsened_vertex_weights))) + DECIMAL_DIGITS + 1;
+      static_cast<int>(std::log10(ranges::max(result_obj.coarsened.vertex_weights))) + DECIMAL_DIGITS + 1;
   auto weight_to_str = LAMBDA_1(fmt::format("{0:{1}.{2}f}", _1, weights_width, DECIMAL_DIGITS));
-  auto weights_str = dump_array_as_braced_list(result_obj.coarsened_vertex_weights, weight_to_str, indent, level + 1);
+  auto weights_str = dump_array_as_braced_list(result_obj.coarsened.vertex_weights, weight_to_str, indent, level + 1);
   auto components = {
-      fmt::format(".coarsened_graph = {}", dump_graph_generic(result_obj.coarsened_graph, indent, level + 1)),
-      fmt::format(".coarsened_inv_graph = {}", dump_graph_generic(result_obj.coarsened_inv_graph, indent, level + 1)),
-      fmt::format(".coarsened_vertex_weights = {}", weights_str),
-      fmt::format(".details = {}", result_obj.details.dump(indent, level + 1))};
+      fmt::format(".coarsened.adj_list = {}", //
+                  dump_graph_generic(result_obj.coarsened.adj_list, indent, level + 1)),
+      fmt::format(".coarsened.inv_adj_list = {}", //
+                  dump_graph_generic(result_obj.coarsened.inv_adj_list, indent, level + 1)),
+      fmt::format(".coarsened.vertex_weights = {}", weights_str),
+      fmt::format(".details = {}", result_obj.details.dump(indent, level + 1)),
+  };
   return merge_dumped_components(components, indent, level);
 }
 } // namespace

@@ -33,23 +33,20 @@ auto read_arguments_from_config_file(ArgumentParser& parser, T& value) {
   }
 }
 
-auto manual_sort_and_check_wim_params(WIMParams& params) -> std::optional<std::string> {
-  auto do_sort_and_check = [](std::string_view name, auto& values) -> std::optional<std::string> {
-    if (values.empty()) {
-      return fmt::format("{} can not be an empty list.", name);
-    }
-    ranges::sort(values);
-    if (auto n0 = values.front(); n0 <= 0) {
-      return fmt::format("{} must be positive integers, while {} is given.", name, n0);
-    }
-    constexpr auto adjacent_equal_filter = views::filter(LAMBDA_1(get<0>(_1) == get<1>(_1)));
-    for (auto [n0, n1] : views::adjacent<2>(values) | adjacent_equal_filter) {
-      return fmt::format("Duplicated {} (detected {}) is disallowed.", name, n0);
-    }
-    return std::nullopt;
-  };
-  return do_sort_and_check("# of RR-sketches", params.num_sketches)
-      .or_else(LAMBDA_0(do_sort_and_check("# of seed vertices", params.num_seeds)));
+template <class T>
+auto sort_and_check_list(std::string_view name, std::span<T> values) -> std::optional<std::string> {
+  if (values.empty()) {
+    return fmt::format("{} can not be an empty list.", name);
+  }
+  ranges::sort(values);
+  if (auto n0 = values.front(); n0 <= 0) {
+    return fmt::format("{} must be positive integers, while {} is given.", name, n0);
+  }
+  constexpr auto adjacent_equal_filter = views::filter(LAMBDA_1(get<0>(_1) == get<1>(_1)));
+  for (auto [n0, n1] : views::adjacent<2>(values) | adjacent_equal_filter) {
+    return fmt::format("Duplicated {} (detected {}) is disallowed.", name, n0);
+  }
+  return std::nullopt;
 }
 } // namespace
 
@@ -90,7 +87,10 @@ auto WIMExperimentParams::parse_from_args(int argc, char** argv) noexcept -> rfl
              manual_add_config_arguments<ManualConfigArguments{.has_config = true, .requires_input_file = true}>,
              read_arguments_from_config_file<WIMExperimentParams>)
       .and_then([](WIMExperimentParams params) -> rfl::Result<WIMExperimentParams> {
-        if (auto err_msg = manual_sort_and_check_wim_params(*params.wim); err_msg) {
+        auto err_msg =
+            sort_and_check_list("# of RR-sketches", std::span{params.wim->n_sketches})
+                .or_else(LAMBDA_0(sort_and_check_list("# of seed vertices", std::span{params.wim->n_seeds})));
+        if (err_msg) {
           return rfl::Error{std::move(*err_msg)};
         }
         return std::move(params);
@@ -104,8 +104,30 @@ auto WIMCoarseningExperimentParams::parse_from_args(int argc, char** argv) noexc
              manual_add_config_arguments<ManualConfigArguments{.has_config = true, .requires_input_file = true}>,
              read_arguments_from_config_file<WIMCoarseningExperimentParams>)
       .and_then([](WIMCoarseningExperimentParams params) -> rfl::Result<WIMCoarseningExperimentParams> {
-        if (auto err_msg = manual_sort_and_check_wim_params(*params.wim); err_msg) {
+        auto err_msg =
+            sort_and_check_list("# of RR-sketches", std::span{params.wim->n_sketches})
+                .or_else(LAMBDA_0(sort_and_check_list("# of seed vertices", std::span{params.wim->n_seeds})));
+        if (err_msg) {
           return rfl::Error{std::move(*err_msg)};
+        }
+        return std::move(params);
+      });
+}
+
+auto WIMContrastExperimentParams::parse_from_args(int argc, char** argv) noexcept
+    -> rfl::Result<WIMContrastExperimentParams> {
+  return parse_from_args_generic<WIMContrastExperimentParams>(
+             argc, argv, // Appends --config etc.
+             manual_add_config_arguments<ManualConfigArguments{.has_config = true, .requires_input_file = true}>,
+             read_arguments_from_config_file<WIMContrastExperimentParams>)
+      .and_then([](WIMContrastExperimentParams params) -> rfl::Result<WIMContrastExperimentParams> {
+        if (auto err_msg = sort_and_check_list("# of seed vertices", std::span{params.n_seeds}); err_msg) {
+          return rfl::Error{std::move(*err_msg)};
+        }
+        if (params.with_rr_sketch) {
+          if (auto err_msg = sort_and_check_list("# of RR-sketches", std::span{params.n_sketches}); err_msg) {
+            return rfl::Error{std::move(*err_msg)};
+          }
         }
         return std::move(params);
       });

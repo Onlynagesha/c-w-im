@@ -74,17 +74,17 @@ auto RRSketchSet::append_single(std::span<vertex_id_t> vertices) noexcept -> voi
   auto next_sketch = std::vector<vertex_id_t>{vertices.begin(), vertices.end()};
   auto next_sketch_id = sketches.size();
   for (auto v : vertices) {
-    BOOST_ASSERT_MSG(v >= 0 && v < num_vertices(), "Vertex index out of range [0, n).");
+    BOOST_ASSERT_MSG(v >= 0 && v < n_vertices(), "Vertex index out of range [0, n).");
     inv_sketches[v].push_back(next_sketch_id);
   }
   sketches.push_back(std::move(next_sketch));
 }
 
 auto RRSketchSet::append(size_t n_sketches) noexcept -> void {
-  auto queue = make_reserved_vector<vertex_id_t>(num_vertices());
-  auto queue_ext = make_reserved_vector<vertex_id_t>(num_vertices());
-  auto vis = DynamicBitset{num_vertices()};
-  auto vis_ext = DynamicBitset{num_vertices()};
+  auto queue = make_reserved_vector<vertex_id_t>(n_vertices());
+  auto queue_ext = make_reserved_vector<vertex_id_t>(n_vertices());
+  auto vis = DynamicBitset{n_vertices()};
+  auto vis_ext = DynamicBitset{n_vertices()};
 
   auto bfs_initialize = [](auto& queue, auto& vis, vertex_id_t center) {
     queue.assign({center});
@@ -123,13 +123,13 @@ auto RRSketchSet::append(size_t n_sketches) noexcept -> void {
 }
 
 auto RRSketchSet::select(vertex_id_t k) noexcept -> std::vector<vertex_id_t> {
-  k = std::min(k, num_vertices());
+  k = std::min(k, n_vertices());
   // Uses negative count to mark the vertices that are already selected
   auto cover_count = [&] {
     auto view = inv_sketches | views::transform(ranges::ssize);
     return std::vector(view.begin(), view.end());
   }();
-  auto covered = DynamicBitset{num_sketches()};
+  auto covered = DynamicBitset{n_sketches()};
   auto res = std::vector<vertex_id_t>{};
   res.reserve(k);
 
@@ -150,7 +150,7 @@ auto RRSketchSet::select(vertex_id_t k) noexcept -> std::vector<vertex_id_t> {
       }
     }
   }
-  auto cover_percentage = 100.0 * covered.count() / num_sketches();
+  auto cover_percentage = 100.0 * covered.count() / n_sketches();
   MYLOG_FMT_DEBUG("Done selecting {} seed vertices. {:.3f}% of RR-sketch covered.", k, cover_percentage);
   return res;
 }
@@ -165,28 +165,6 @@ auto RRSketchSet::dump() noexcept -> std::string {
     res += fmt::format("\n\t[{}] = {}", v, ir);
   }
   return res;
-}
-
-auto read_wim_graph_data(const std::string& input_file) noexcept -> rfl::Result<AdjacencyListPair<WIMEdge>> {
-  auto read_res = read_directed_wim_edge_list(input_file);
-  if (!read_res) {
-    return std::move(*read_res.error());
-  }
-  auto& edge_list = (*read_res).edge_list;
-  auto& vertex_weights = (*read_res).vertex_weights;
-  return AdjacencyListPair<WIMEdge>{
-      .adj_list = {edge_list}, .inv_adj_list = {edge_list}, .vertex_weights = std::move(vertex_weights)};
-}
-
-auto read_wbim_graph_data(const std::string& input_file) noexcept -> rfl::Result<AdjacencyListPair<WBIMEdge>> {
-  auto read_res = read_directed_wbim_edge_list(input_file);
-  if (!read_res) {
-    return std::move(*read_res.error());
-  }
-  auto& edge_list = (*read_res).edge_list;
-  auto& vertex_weights = (*read_res).vertex_weights;
-  return AdjacencyListPair<WBIMEdge>{
-      .adj_list = {edge_list}, .inv_adj_list = {edge_list}, .vertex_weights = std::move(vertex_weights)};
 }
 
 auto wim_simulate(const AdjacencyList<WIMEdge>& graph, const VertexSet& seeds, uint64_t try_count) noexcept

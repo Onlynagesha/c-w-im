@@ -36,7 +36,7 @@ enum class SeedExpandingRule { LOCAL, SIMULATIVE, ITERATIVE };
 
 struct CoarseningParams {
   NeighborMatchRule neighbor_match_rule = NeighborMatchRule::HEM_P_MAX;
-  EdgeWeightRule edge_weight_rule = EdgeWeightRule::SEPARATE_SIMPLE;
+  EdgeWeightRule edge_weight_rule = EdgeWeightRule::SEPARATE_PRECISE;
   EdgeSeedWeightRule edge_seed_weight_rule = EdgeSeedWeightRule::BEST_SEED_INDEX;
   InOutHeuristicRule in_out_heuristic_rule = InOutHeuristicRule::P;
   VertexWeightRule vertex_weight_rule = VertexWeightRule::AVERAGE_BY_PATHS;
@@ -45,7 +45,7 @@ struct CoarseningParams {
 
 struct ExpandingParams {
   SeedExpandingRule seed_expanding_rule;
-  // Unused for S_SEPARATE only
+  // Used for MERGED only
   using NIterations = rfl::Rename<              //
       "expanding_n_iterations",                 //
       rfl::Validator<uint64_t, rfl::Minimum<1>> //
@@ -216,30 +216,35 @@ private:
 public:
   template <std::convertible_to<vertex_id_t>... Args>
   auto to_group_id(Args... vertex_indices) const {
+    BOOST_ASSERT_MSG(((vertex_indices < n) && ...), "Vertex indices are out of range [0, n).");
     auto get_fn = LAMBDA_1(group_id[_1]);
     return to_get_fn_result_generic(get_fn, vertex_indices...);
   }
 
   template <std::convertible_to<vertex_id_t>... Args>
   auto to_group_ptr(Args... vertex_indices) const {
+    BOOST_ASSERT_MSG(((vertex_indices < n) && ...), "Vertex indices are out of range [0, n).");
     auto get_fn = LAMBDA_1(groups.data() + group_id[_1]);
     return to_get_fn_result_generic(get_fn, vertex_indices...);
   }
 
   template <std::convertible_to<vertex_id_t>... Args>
   auto to_index_in_group(Args... vertex_indices) const {
+    BOOST_ASSERT_MSG(((vertex_indices < n) && ...), "Vertex indices are out of range [0, n).");
     auto get_fn = LAMBDA_1(index_in_group[_1]);
     return to_get_fn_result_generic(get_fn, vertex_indices...);
   }
 
   template <std::convertible_to<vertex_id_t>... Args>
   auto to_group_size(Args... vertex_indices) const {
+    BOOST_ASSERT_MSG(((vertex_indices < n) && ...), "Vertex indices are out of range [0, n).");
     auto get_fn = LAMBDA_1(groups[group_id[_1]].n_members());
     return to_get_fn_result_generic(get_fn, vertex_indices...);
   }
 
   template <std::convertible_to<vertex_id_t>... Args>
   auto group_id_to_size(Args... group_indices) const {
+    BOOST_ASSERT_MSG(((group_indices < n_coarsened) && ...), "Group indices are out of range [0, nc).");
     auto get_fn = LAMBDA_1(groups[_1].n_members());
     return to_get_fn_result_generic(get_fn, group_indices...);
   }
@@ -247,28 +252,10 @@ public:
 
 template <same_as_either<CoarseningBrief, CoarseningDetails> DetailsType>
 struct CoarsenGraphResult {
-  AdjacencyList<WIMEdge> coarsened_graph;
-  InvAdjacencyList<WIMEdge> coarsened_inv_graph;
-  std::vector<vertex_weight_t> coarsened_vertex_weights;
+  WIMAdjacencyListPair coarsened;
   DetailsType details;
 
   auto dump(int indent = 0, int level = 0) const noexcept -> std::string;
-
-  auto in_degree(vertex_id_t v_coarsened) const {
-    BOOST_ASSERT_MSG(v_coarsened >= 0 && v_coarsened < graph::num_vertices(coarsened_inv_graph),
-                     "v is out of range [0, n) where n = # of coarsened vertices.");
-    return graph::degree(coarsened_inv_graph, v_coarsened);
-  }
-
-  auto out_degree(vertex_id_t v_coarsened) const {
-    BOOST_ASSERT_MSG(v_coarsened >= 0 && v_coarsened < graph::num_vertices(coarsened_graph),
-                     "v is out of range [0, n) where n = # of coarsened vertices.");
-    return graph::degree(coarsened_graph, v_coarsened);
-  }
-
-  auto degree(vertex_id_t v_coarsened) const {
-    return in_degree(v_coarsened) + out_degree(v_coarsened);
-  }
 };
 
 using CoarsenGraphBriefResult = CoarsenGraphResult<CoarseningBrief>;
@@ -305,8 +292,10 @@ auto coarsen_wim_graph_w(const AdjacencyList<WIMEdge>& graph, const InvAdjacency
                          std::span<const vertex_weight_t> vertex_weights, const CoarseningParams& params) noexcept
     -> CoarsenGraphBriefResult;
 
-auto further_coarsen_wim_graph(const CoarsenGraphBriefResult& last_result, const CoarseningParams& params) noexcept
-    -> CoarsenGraphBriefResult;
+inline auto coarsen_wim_graph_p(const WIMAdjacencyListPair& graph, const CoarseningParams& params) noexcept
+    -> CoarsenGraphBriefResult {
+  return coarsen_wim_graph_w(graph.adj_list, graph.inv_adj_list, graph.vertex_weights, params);
+}
 
 auto coarsen_wim_graph_d(const AdjacencyList<WIMEdge>& graph, const InvAdjacencyList<WIMEdge>& inv_graph,
                          const CoarseningParams& params) noexcept -> CoarsenGraphDetailedResult;
@@ -315,8 +304,10 @@ auto coarsen_wim_graph_d_w(const AdjacencyList<WIMEdge>& graph, const InvAdjacen
                            std::span<const vertex_weight_t> vertex_weights, const CoarseningParams& params) noexcept
     -> CoarsenGraphDetailedResult;
 
-auto further_coarsen_wim_graph_d(const CoarsenGraphDetailedResult& last_result, const CoarseningParams& params) noexcept
-    -> CoarsenGraphDetailedResult;
+inline auto coarsen_wim_graph_d_p(const WIMAdjacencyListPair& graph, const CoarseningParams& params) noexcept
+    -> CoarsenGraphDetailedResult {
+  return coarsen_wim_graph_d_w(graph.adj_list, graph.inv_adj_list, graph.vertex_weights, params);
+}
 
 // ---- Step 4: Expanding seeds ----
 
