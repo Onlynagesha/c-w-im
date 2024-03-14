@@ -23,7 +23,7 @@ struct VertexSet {
   }
 
   VertexSet(vertex_id_t n, std::initializer_list<vertex_id_t> vertices)
-      : VertexSet(n, {vertices.begin(), vertices.end()}) {}
+      : VertexSet(n, std::span{vertices.begin(), vertices.end()}) {}
 
   auto num_vertices_in_whole_graph() const -> vertex_id_t {
     return static_cast<vertex_id_t>(mask.size());
@@ -131,31 +131,103 @@ auto wbim_simulate_w(const AdjacencyList<WBIMEdge>& graph, std::span<const verte
                      const VertexSet& seeds, const VertexSet& boosted_vertices, uint64_t try_count) noexcept
     -> rfl::Result<double>;
 
-inline auto wim_simulate_s(const AdjacencyList<WIMEdge>& graph, std::span<const vertex_id_t> seeds, uint64_t try_count)
-    -> rfl::Result<double> {
-  auto seed_set = VertexSet{graph::num_vertices(graph), seeds};
-  return wim_simulate(graph, seed_set, try_count);
-}
+// result[v] = A value in range [0, 1]. Frequency that v received message in all the simulations
+auto wim_simulate_p(const AdjacencyList<WIMEdge>& graph, const VertexSet& seeds, uint64_t try_count)
+    -> rfl::Result<std::vector<double>>;
 
-inline auto wim_simulate_w_s(const AdjacencyList<WIMEdge>& graph, std::span<const vertex_weight_t> vertex_weights,
-                             std::span<const vertex_id_t> seeds, uint64_t try_count) noexcept -> rfl::Result<double> {
-  auto seed_set = VertexSet{graph::num_vertices(graph), seeds};
-  return wim_simulate_w(graph, vertex_weights, seed_set, try_count);
-}
+auto wbim_simulate_p(const AdjacencyList<WBIMEdge>& graph, const VertexSet& seeds, const VertexSet& boosted_vertices,
+                     uint64_t try_count) -> rfl::Result<std::vector<double>>;
 
-inline auto wbim_simulate_s(const AdjacencyList<WBIMEdge>& graph, std::span<const vertex_id_t> seeds,
-                            std::span<const vertex_id_t> boosted_vertices, uint64_t try_count) -> rfl::Result<double> {
+namespace details::wim {
+template <class T>
+auto as_vertex_set(vertex_id_t n, T&& vertices) -> decltype(auto) {
+  if constexpr (std::is_same_v<std::remove_cvref_t<T>, VertexSet>) {
+    return std::forward<T>(vertices);
+  } else if constexpr (contiguous_range_of_exactly<std::remove_cvref_t<T>, vertex_id_t>) {
+    return VertexSet(n, vertices);
+  } else if constexpr (same_as_either<std::remove_cvref_t<T>, std::nullptr_t, std::nullopt_t>) {
+    return VertexSet(n, {});
+  } else {
+    static_assert(rfl::always_false_v<T>, "Invalid type: Expects VertexSet or some contiguous range of vertex_id_t.");
+  }
+}
+} // namespace details::wim
+
+template <is_edge_property E, class VertexWeights, class SeedsOrList, class BoostedOrList>
+inline auto simulate(const AdjacencyList<E>& graph, VertexWeights&& vertex_weights, SeedsOrList&& seeds_or_list,
+                     BoostedOrList&& boosted_or_list, uint64_t try_count) -> rfl::Result<double> {
+  constexpr auto USES_VERTEX_WEIGHTS =
+      same_as_either<std::remove_cvref_t<VertexWeights>, std::nullptr_t, std::nullopt_t>;
+  static_assert(USES_VERTEX_WEIGHTS || std::is_convertible_v<VertexWeights, std::span<vertex_id_t>>,
+                "Invalid vertex weight type: Expects a contiguous range of vertex_id_t, "
+                "or either of nullptr or std::nullopt as placeholder.");
+
   auto n = graph::num_vertices(graph);
-  auto seed_set = VertexSet{n, seeds};
-  auto boosted_set = VertexSet{n, boosted_vertices};
-  return wbim_simulate(graph, seed_set, boosted_set, try_count);
+  auto&& seeds = details::wim::as_vertex_set(n, seeds_or_list);
+  if constexpr (std::is_same_v<E, WIMEdge>) {
+    if (USES_VERTEX_WEIGHTS) {
+      return wim_simulate_w(graph, vertex_weights, seeds, try_count);
+    } else {
+      return wim_simulate(graph, seeds, try_count);
+    }
+  } else if constexpr (std::is_same_v<E, WBIMEdge>) {
+    auto&& boosted_vertices = details::wim::as_vertex_set(n, boosted_or_list);
+    if (USES_VERTEX_WEIGHTS) {
+      return wbim_simulate_w(graph, vertex_weights, seeds, boosted_vertices, try_count);
+    } else {
+      return wbim_simulate(graph, seeds, boosted_vertices, try_count);
+    }
+  } else {
+    static_assert(rfl::always_false_v<E>, "Invalid edge type.");
+  }
 }
 
-inline auto wbim_simulate_w_s(const AdjacencyList<WBIMEdge>& graph, std::span<const vertex_weight_t> vertex_weights,
-                              std::span<const vertex_id_t> seeds, std::span<const vertex_id_t> boosted_vertices,
-                              uint64_t try_count) -> rfl::Result<double> {
+template <is_edge_property E, class SeedsOrList, class BoostedOrList>
+inline auto simulate_p(const AdjacencyList<E>& graph, SeedsOrList&& seeds_or_list, BoostedOrList&& boosted_or_list,
+                       uint64_t try_count) -> rfl::Result<std::vector<double>> {
   auto n = graph::num_vertices(graph);
-  auto seed_set = VertexSet{n, seeds};
-  auto boosted_set = VertexSet{n, boosted_vertices};
-  return wbim_simulate_w(graph, vertex_weights, seed_set, boosted_set, try_count);
+  auto&& seeds = details::wim::as_vertex_set(n, seeds_or_list);
+  if constexpr (std::is_same_v<E, WIMEdge>) {
+    return wim_simulate_p(graph, seeds, try_count);
+  } else if constexpr (std::is_same_v<E, WBIMEdge>) {
+    auto&& boosted_vertices = details::wim::as_vertex_set(n, boosted_or_list);
+    return wbim_simulate_p(graph, seeds, boosted_vertices, try_count);
+  } else {
+    static_assert(rfl::always_false_v<E>, "Invalid edge type.");
+  }
+}
+
+struct DetectProbabilityFromSeedsResult {
+  std::vector<edge_probability_t> p_in;
+  std::vector<edge_probability_t> p_in_boosted;
+
+  DetectProbabilityFromSeedsResult() = default;
+  explicit DetectProbabilityFromSeedsResult(vertex_id_t n) : p_in(n, 0.0_ep), p_in_boosted(n, 0.0_ep) {}
+
+  auto swap(DetectProbabilityFromSeedsResult& rhs) -> void {
+    p_in.swap(rhs.p_in);
+    p_in_boosted.swap(rhs.p_in_boosted);
+  }
+
+  auto equals_with(const DetectProbabilityFromSeedsResult& rhs) const -> bool {
+    return ranges::equal(p_in, rhs.p_in) && ranges::equal(p_in_boosted, rhs.p_in_boosted);
+  }
+};
+
+auto wim_detect_probability_from_seeds(const InvAdjacencyList<WIMEdge>& inv_graph, const VertexSet& seeds,
+                                       vertex_id_t max_distance) -> rfl::Result<DetectProbabilityFromSeedsResult>;
+
+auto wbim_detect_probability_from_seeds(const InvAdjacencyList<WBIMEdge>& inv_graph, const VertexSet& seeds,
+                                        vertex_id_t max_distance) -> rfl::Result<DetectProbabilityFromSeedsResult>;
+
+template <is_edge_property E>
+auto detect_probability_from_seeds(const InvAdjacencyList<E>& inv_graph, const VertexSet& seeds,
+                                   vertex_id_t max_distance) -> rfl::Result<DetectProbabilityFromSeedsResult> {
+  if constexpr (std::is_same_v<E, WIMEdge>) {
+    return wim_detect_probability_from_seeds(inv_graph, seeds, max_distance);
+  } else if constexpr (std::is_same_v<E, WBIMEdge>) {
+    return wbim_detect_probability_from_seeds(inv_graph, seeds, max_distance);
+  } else {
+    static_assert(rfl::always_false_v<E>, "Invalid edge type.");
+  }
 }

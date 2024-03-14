@@ -3,29 +3,38 @@
 #include <fmt/ranges.h>
 
 namespace {
-template <is_edge_property E, same_as_either<VertexSet, std::nullptr_t> BoostedSet, class VertexWeights>
+template <same_as_either<double, std::vector<double>> ReturnType, //
+          is_edge_property E,                                     //
+          same_as_either<VertexSet, std::nullptr_t> BoostedSet,   //
+          random_access_range_of_exactly<vertex_weight_t> VertexWeights>
 auto wim_simulate_generic(const AdjacencyList<E>& graph, const VertexSet& seeds, const BoostedSet& boosted_vertices,
-                          VertexWeights vertex_weights, uint64_t try_count) -> rfl::Result<double> {
+                          VertexWeights vertex_weights, uint64_t try_count) -> rfl::Result<ReturnType> {
   if (try_count <= 0) {
     return rfl::Error{"Try count of simulation must be a positive integer."};
   }
   auto n = graph::num_vertices(graph);
   auto s = seeds.vertex_list.size();
-  auto sum = 0.0;
+  auto sum = [&]() {
+    if constexpr (std::is_same_v<ReturnType, double>) {
+      return 0.0;
+    } else {
+      return std::vector<uint64_t>(n, 0);
+    }
+  }();
 
   // BFS queue: the first s vertices are fixed as seeds
   auto queue = make_reserved_vector<vertex_id_t>(n);
   ranges::copy(seeds.vertex_list, std::back_inserter(queue));
   auto vis = DynamicBitset(n);
 
-  auto rand_test_edge = [&](vertex_id_t source, const E& e, bool is_seed) {
+  auto rand_test_edge = [&](vertex_id_t target, const E& e, bool source_is_seed) {
     if constexpr (std::is_same_v<E, WIMEdge>) {
-      return e.rand_test(is_seed);
+      return e.rand_test(source_is_seed);
     } else if constexpr (std::is_same_v<E, WBIMEdge>) {
       if constexpr (std::is_same_v<BoostedSet, std::nullptr_t>) {
-        return e.rand_test(is_seed, false);
+        return e.rand_test(false);
       } else {
-        return e.rand_test(is_seed, boosted_vertices.mask.test(source));
+        return e.rand_test(boosted_vertices.mask.test(target));
       }
     } else {
       static_assert(rfl::always_false_v<E>, "Unsupported edge property type.");
@@ -35,38 +44,84 @@ auto wim_simulate_generic(const AdjacencyList<E>& graph, const VertexSet& seeds,
     vis[v] = true;
     queue.push_back(v);
   };
-  auto vid_to_weight = views::transform(LAMBDA_1(vertex_weights[_1]));
 
   for (auto try_index : range(try_count)) {
     // Initialization for current BFS process
     queue.resize(s); // Preserves seeds only
     vis = seeds.mask;
-    // Part 1: Seed vertices (probability = p_seed)
-    for (auto cur : seeds.vertex_list) {
-      for (auto [v, w] : graph[cur]) {
-        if (!vis[v] && rand_test_edge(cur, w, true)) {
-          add_to_queue(v);
-        }
-      }
-    }
-    // Part 2: Non-seed vertices (probability = p or p_boost)
-    for (auto i = s; i < queue.size(); i++) {
+    // Starts BFS
+    for (auto i = 0; i < queue.size(); i++) {
       auto cur = queue[i];
       for (auto [v, w] : graph[cur]) {
-        if (!vis[v] && rand_test_edge(cur, w, false)) {
+        if (!vis[v] && rand_test_edge(v, w, i < s)) {
           add_to_queue(v);
         }
       }
     }
     // Excluding the seeds themselves to prevent O(try_count * s) redundant calculation.
-    auto non_seed_sum = accumulate_sum(queue | views::drop(s) | vid_to_weight, 0.0);
-    MYLOG_FMT_TRACE("Simulation #{}: score excluding seeds = {}, queue = {}", try_index, non_seed_sum, queue);
-    sum += non_seed_sum;
+    if constexpr (std::is_same_v<ReturnType, double>) {
+      auto non_seed_sum = accumulate_sum(queue | views::drop(s) | TRANSFORM_VIEW(vertex_weights[_1]));
+      MYLOG_FMT_TRACE("Simulation #{}: score excluding seeds = {}, queue = {}", try_index, non_seed_sum, queue);
+      sum += non_seed_sum;
+    } else {
+      ranges::for_each(queue | views::drop(s), LAMBDA_1(sum[_1] += 1));
+      MYLOG_FMT_TRACE("After simulation #{}: sum = {}", try_index, sum);
+    }
   }
   // Result = Total vertex weight of seeds + Average of total BFS-traversed vertex weight excluding seeds
-  auto seed_sum = accumulate_sum(seeds.vertex_list | vid_to_weight, 0.0);
-  MYLOG_FMT_DEBUG("Total weight of seed vertices = {}, with # of seeds = {}", seed_sum, seeds.vertex_list.size());
-  return accumulate_sum(seeds.vertex_list | vid_to_weight, 0.0) + (sum / try_count);
+  if constexpr (std::is_same_v<ReturnType, double>) {
+    auto seed_sum = accumulate_sum(seeds.vertex_list | TRANSFORM_VIEW(vertex_weights[_1]));
+    MYLOG_FMT_DEBUG("Total weight of seed vertices = {}, with # of seeds = {}", //
+                    seed_sum, seeds.vertex_list.size());
+    return accumulate_sum(seeds.vertex_list | TRANSFORM_VIEW(vertex_weights[_1])) + (sum / try_count);
+  } else {
+    auto res = [&]() {
+      auto view = sum | TRANSFORM_VIEW(static_cast<double>(_1) / try_count);
+      return std::vector(view.begin(), view.end());
+    }();
+    ranges::for_each(seeds.vertex_list, LAMBDA_1(res[_1] = 1.0));
+    MYLOG_FMT_TRACE("Final result: {::.4f}", res);
+    return res;
+  }
+}
+
+template <is_edge_property E>
+auto detect_probability_from_seeds_generic(const InvAdjacencyList<E>& inv_graph, const VertexSet& seeds,
+                                           vertex_id_t max_distance) -> rfl::Result<DetectProbabilityFromSeedsResult> {
+  auto n = graph::num_vertices(inv_graph);
+  auto res = DetectProbabilityFromSeedsResult(n);
+  auto temp = DetectProbabilityFromSeedsResult(n);
+
+  auto paths = make_reserved_vector<edge_probability_t>(n);
+  auto paths_boosted = make_reserved_vector<edge_probability_t>(n);
+  for (auto k = 1_vid; k <= max_distance; k++) {
+    for (auto v : vertices(inv_graph)) {
+      if (seeds.contains(v)) {
+        continue; // F[s] == F_boost[s] == 0.0 for each seed s
+      }
+      paths.clear();
+      paths_boosted.clear();
+      for (auto [u, w] : inv_graph[v]) {
+        if (seeds.contains(u)) {
+          paths.push_back(get_p_seed(w));
+          paths_boosted.push_back(get_p_seed_or_boost(w));
+        } else {
+          paths.push_back(w.p * res.p_in[u]);
+          paths_boosted.push_back(get_p_boost(w) * res.p_in[u]);
+        }
+      }
+      temp.p_in[v] = at_least_1_probability_r(paths);
+      temp.p_in_boosted[v] = at_least_1_probability_r(paths_boosted);
+    }
+    MYLOG_FMT_TRACE("F[{}][] = {::.4f}", k, temp.p_in);
+    MYLOG_FMT_TRACE("F_boost[{}][] = {::.4f}", k, temp.p_in_boosted);
+    if (temp.equals_with(res)) {
+      MYLOG_FMT_TRACE("Early stops when k = {}", k);
+      break;
+    }
+    temp.swap(res);
+  }
+  return std::move(res);
 }
 } // namespace
 
@@ -169,26 +224,51 @@ auto RRSketchSet::dump() noexcept -> std::string {
 
 auto wim_simulate(const AdjacencyList<WIMEdge>& graph, const VertexSet& seeds, uint64_t try_count) noexcept
     -> rfl::Result<double> {
-  return wim_simulate_generic(graph, seeds, nullptr, views::repeat(1.0_vw), try_count);
+  if (seeds.size() == 0) {
+    return 0.0;
+  }
+  return wim_simulate_generic<double>(graph, seeds, nullptr, views::repeat(1.0_vw), try_count);
 }
 
 auto wim_simulate_w(const AdjacencyList<WIMEdge>& graph, std::span<const vertex_weight_t> vertex_weights,
                     const VertexSet& seeds, uint64_t try_count) noexcept -> rfl::Result<double> {
-  return wim_simulate_generic(graph, seeds, nullptr, vertex_weights, try_count);
+  if (vertex_weights.empty()) {
+    return wim_simulate(graph, seeds, try_count);
+  }
+  return wim_simulate_generic<double>(graph, seeds, nullptr, vertex_weights, try_count);
 }
 
 auto wbim_simulate(const AdjacencyList<WBIMEdge>& graph, const VertexSet& seeds, const VertexSet& boosted_vertices,
                    uint64_t try_count) noexcept -> rfl::Result<double> {
   auto vertex_weights = views::repeat(1.0_vw);
-  auto before = wim_simulate_generic(graph, seeds, nullptr, vertex_weights, try_count);
-  auto after = wim_simulate_generic(graph, seeds, boosted_vertices, vertex_weights, try_count);
-  return after - before;
+  return wim_simulate_generic<double>(graph, seeds, boosted_vertices, vertex_weights, try_count);
 }
 
 auto wbim_simulate_w(const AdjacencyList<WBIMEdge>& graph, std::span<const vertex_weight_t> vertex_weights,
                      const VertexSet& seeds, const VertexSet& boosted_vertices, uint64_t try_count) noexcept
     -> rfl::Result<double> {
-  auto before = wim_simulate_generic(graph, seeds, nullptr, vertex_weights, try_count);
-  auto after = wim_simulate_generic(graph, seeds, boosted_vertices, vertex_weights, try_count);
-  return after - before;
+  if (vertex_weights.empty()) {
+    return wbim_simulate(graph, seeds, boosted_vertices, try_count);
+  }
+  return wim_simulate_generic<double>(graph, seeds, boosted_vertices, vertex_weights, try_count);
+}
+
+auto wim_simulate_p(const AdjacencyList<WIMEdge>& graph, const VertexSet& seeds, uint64_t try_count)
+    -> rfl::Result<std::vector<double>> {
+  return wim_simulate_generic<std::vector<double>>(graph, seeds, nullptr, views::repeat(1.0_vw), try_count);
+}
+
+auto wbim_simulate_p(const AdjacencyList<WBIMEdge>& graph, const VertexSet& seeds, const VertexSet& boosted_vertices,
+                     uint64_t try_count) -> rfl::Result<std::vector<double>> {
+  return wim_simulate_generic<std::vector<double>>(graph, seeds, boosted_vertices, views::repeat(1.0_vw), try_count);
+}
+
+auto wim_detect_probability_from_seeds(const InvAdjacencyList<WIMEdge>& inv_graph, const VertexSet& seeds,
+                                       vertex_id_t max_distance) -> rfl::Result<DetectProbabilityFromSeedsResult> {
+  return detect_probability_from_seeds_generic(inv_graph, seeds, max_distance);
+}
+
+auto wbim_detect_probability_from_seeds(const InvAdjacencyList<WBIMEdge>& inv_graph, const VertexSet& seeds,
+                                        vertex_id_t max_distance) -> rfl::Result<DetectProbabilityFromSeedsResult> {
+  return detect_probability_from_seeds_generic(inv_graph, seeds, max_distance);
 }

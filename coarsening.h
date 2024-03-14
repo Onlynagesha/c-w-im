@@ -26,11 +26,9 @@ enum class EdgeWeightRule { SEPARATE_SIMPLE, MERGED_SIMPLE, SEPARATE_PRECISE, ME
 
 enum class EdgeSeedWeightRule { AVERAGE, MAX, BEST_SEED_INDEX };
 
-enum class InOutHeuristicRule { UNIT, COUNT, P, W };
+enum class InOutHeuristicRule { UNIT, COUNT, P, W, SEED };
 
 enum class VertexWeightRule { AVERAGE, AVERAGE_BY_PATHS, SUM };
-// C-w-BIM only
-enum class SeedMergingRule { UNUSED, SINGLE, MERGED };
 
 enum class SeedExpandingRule { LOCAL, SIMULATIVE, ITERATIVE };
 
@@ -40,7 +38,7 @@ struct CoarseningParams {
   EdgeSeedWeightRule edge_seed_weight_rule = EdgeSeedWeightRule::BEST_SEED_INDEX;
   InOutHeuristicRule in_out_heuristic_rule = InOutHeuristicRule::P;
   VertexWeightRule vertex_weight_rule = VertexWeightRule::AVERAGE_BY_PATHS;
-  SeedMergingRule seed_merging_rule = SeedMergingRule::UNUSED;
+  vertex_id_t max_distance_from_seed = 6;
 };
 
 struct ExpandingParams {
@@ -85,10 +83,10 @@ struct MongooseMatchResult {
   std::vector<vertex_id_t> group_id;
 };
 
-auto mongoose_match(const AdjacencyList<edge_probability_t>& graph, const CoarseningParams& params) noexcept
+auto mongoose_match(const AdjacencyList<edge_probability_t>& bidir_graph, const CoarseningParams& params) noexcept
     -> MongooseMatchResult;
 
-auto mongoose_match_with_seeds(const AdjacencyList<edge_probability_t>& graph, std::span<const vertex_id_t> seeds,
+auto mongoose_match_with_seeds(const AdjacencyList<edge_probability_t>& bidir_graph, std::span<const vertex_id_t> seeds,
                                const CoarseningParams& params) noexcept -> MongooseMatchResult;
 
 // ---- Step 3: Performs coarsening by the groups obtained previously ----

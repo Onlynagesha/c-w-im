@@ -35,21 +35,49 @@ struct WIMEdge {
 
 struct WBIMEdge {
   edge_probability_t p;
-  edge_probability_t p_seed;
   edge_probability_t p_boost;
 
   auto is_valid() const -> bool {
-    auto [p_min, p_max] = std::minmax({p, p_seed, p_boost});
+    auto [p_min, p_max] = std::minmax(p, p_boost);
     return 0.0_ep <= p_min && p_max <= 1.0_ep;
   }
-  auto rand_test(bool is_seed, bool is_boosted) const -> bool {
-    return rand_bool(is_seed ? p_seed : is_boosted ? p_boost : p);
+  auto rand_test(bool is_boosted) const -> bool {
+    return rand_bool(is_boosted ? p_boost : p);
   }
   constexpr auto operator<=>(const WBIMEdge& rhs) const = default;
 };
 
 template <class E>
 concept is_edge_property = std::same_as<E, WIMEdge> || std::same_as<E, WBIMEdge>;
+
+template <is_edge_property E>
+inline auto get_p_seed_or_boost(const E& e) -> edge_probability_t {
+  if constexpr (requires { e.p_seed; }) {
+    return e.p_seed;
+  } else if constexpr (requires { e.p_boost; }) {
+    return e.p_boost;
+  } else {
+    return e.p;
+  }
+}
+
+template <is_edge_property E>
+inline auto get_p_seed(const E& e) -> edge_probability_t {
+  if constexpr (requires { e.p_seed; }) {
+    return e.p_seed;
+  } else {
+    return e.p;
+  }
+}
+
+template <is_edge_property E>
+inline auto get_p_boost(const E& e) -> edge_probability_t {
+  if constexpr (requires { e.p_boost; }) {
+    return e.p_boost;
+  } else {
+    return e.p;
+  }
+};
 
 template <is_edge_property E>
 struct ReadGraphResult {

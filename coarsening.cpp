@@ -467,7 +467,7 @@ auto merge_coarsened_wim_graph_edge(CoarsenedEdgeDetails& dest, const CoarsenedE
     dest.merged.p = sum / at_least_1_probability_r(p_in);
   }
 
-  // Part (2): merged.p_boost, which only considers the best candidate inside the group gu
+  // Part (2): merged.p_seed, which only considers the best candidate inside the group gu
   dest.merged.p_seed = [&]() {
     if (params.edge_seed_weight_rule == EdgeSeedWeightRule::BEST_SEED_INDEX) {
       auto res = get_merged_p_simple(dest, gu, gv, gu.best_seed_index, true);
@@ -787,10 +787,8 @@ auto expand_wim_seed_vertices_w_impl(const AdjacencyList<WIMEdge>& graph,
     // S_ITERATIVE: Result of S_SEPARATE as initial solution
     BOOST_ASSERT(params.seed_expanding_rule == SeedExpandingRule::ITERATIVE);
     make_expanded_seeds_as_s_local();
-    auto sim_res = wim_simulate_w_s(graph, vertex_weights, expanded_seeds, **params.simulation_try_count);
-    if (!sim_res) {
-      return *sim_res.error(); // Handles unexpected failure
-    }
+    auto sim_res = simulate(graph, vertex_weights, expanded_seeds, nullptr, **params.simulation_try_count);
+    RFL_RETURN_ON_ERROR(sim_res);
     MYLOG_FMT_DEBUG("Initial expanded seed set: {}\n\tWith simulation result = {:.4f}", expanded_seeds, *sim_res);
     // Changable only of at least 2 vertices in the group that is expanded from the coarsened seed vertex.
     auto changable_group_indices = std::vector<size_t>{};
@@ -822,10 +820,8 @@ auto expand_wim_seed_vertices_w_impl(const AdjacencyList<WIMEdge>& graph,
       MYLOG_FMT_DEBUG("Iteration #{}: Attempting to change {} to {} (in group {} coarsened to vertex #{})",
                       iteration_index, prev, next, group.members, coarsened_seeds[si]);
       expanded_seeds[si] = next;
-      auto next_sim_res = wim_simulate_w_s(graph, vertex_weights, expanded_seeds, **params.simulation_try_count);
-      if (!next_sim_res) {
-        return *next_sim_res.error();
-      }
+      auto next_sim_res = simulate(graph, vertex_weights, expanded_seeds, nullptr, **params.simulation_try_count);
+      RFL_RETURN_ON_ERROR(next_sim_res);
       MYLOG_FMT_DEBUG("Iteration #{}: Candidate {} vs. {}: Simulation result: {:.4f} vs. {:.4f}", iteration_index, next,
                       prev, *next_sim_res, *sim_res);
       if (*next_sim_res > *sim_res) {
@@ -878,11 +874,9 @@ auto mongoose_match_with_seeds(const AdjacencyList<edge_probability_t>& graph, s
 
   // Step 1: Neighbor matching
   ranges::shuffle(seq, rand_engine);
-  if (params.seed_merging_rule == SeedMergingRule::SINGLE) {
-    for (auto s : seeds) {
-      BOOST_ASSERT_MSG(s >= 0 && s < n, "Seed vertex out of range [0, n).");
-      match[s] = s; // Marks the seeds as single-matched
-    }
+  for (auto s : seeds) {
+    BOOST_ASSERT_MSG(s >= 0 && s < n, "Seed vertex out of range [0, n).");
+    match[s] = s; // Marks the seeds as single-matched
   }
   for (auto v : seq) {
     if (match[v] != -1) {
@@ -909,11 +903,9 @@ auto mongoose_match_with_seeds(const AdjacencyList<edge_probability_t>& graph, s
 
   // Step 2: Brotherly matching & Adoptive matching
   ranges::shuffle(seq, rand_engine);
-  if (params.seed_merging_rule == SeedMergingRule::SINGLE) {
-    for (auto s : seeds) {
-      BOOST_ASSERT_MSG(s >= 0 && s < n, "Seed vertex out of range [0, n).");
-      match[s] = -1; // Uses -1 to mark seeds
-    }
+  for (auto s : seeds) {
+    BOOST_ASSERT_MSG(s >= 0 && s < n, "Seed vertex out of range [0, n).");
+    match[s] = -1; // Uses -1 to mark seeds
   }
   for (auto v : seq) {
     if (match[v] != v) {

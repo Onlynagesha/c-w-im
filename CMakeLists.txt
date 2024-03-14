@@ -110,7 +110,11 @@ add_executable(test-ranking-algorithms
     playground/test_ranking_algorithms.cpp
     contrast_algorithms.cpp)
 
-foreach (target test-coarsening test-ranking-algorithms)
+add_executable(test-seed-detection
+    playground/test_seed_detection.cpp
+    wim.cpp)
+
+foreach (target test-coarsening test-ranking-algorithms test-seed-detection)
     target_link_libraries(${target} PRIVATE io-components)
     target_compile_definitions(${target} PRIVATE ENABLES_MYLOG_TRACE)
 endforeach()
@@ -118,7 +122,7 @@ endforeach()
 foreach(target ${COMPONENT_OBJECTS}
                ${EXPERIMENT_EXECUTABLES}
                create-dataset to-matrix-market
-               test-coarsening test-ranking-algorithms)
+               test-coarsening test-ranking-algorithms test-seed-detection)
     target_compile_options(${target} PRIVATE ${COMMON_COMPILE_OPTIONS})
     target_compile_definitions(${target} PRIVATE ${COMMON_COMPILE_DEFINITIONS})
     target_include_directories(${target} PRIVATE ${COMMON_INCLUDE_DIRS})

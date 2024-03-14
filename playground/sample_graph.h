@@ -24,6 +24,11 @@ inline const auto SAMPLE_EDGES_1_RIGHT =
 inline auto SAMPLE_EDGES_2 =
     std::vector<EdgeTuple>{{1, 2, 0.3}, {1, 3, 0.4}, {3, 2, 0.5}, {2, 4, 0.6}, {3, 5, 0.7}, {4, 5, 0.8}};
 
+inline auto SAMPLE_EDGES_3 = std::vector<EdgeTuple>{
+    {1, 0, 0.20},   {2, 0, 0.21},   {3, 0, 0.22},   {4, 2, 0.25},   {5, 2, 0.26},  {6, 2, 0.27},
+    {7, 3, 0.28},   {9, 3, 0.29},   {8, 5, 0.30},   {10, 9, 0.31},  {13, 9, 0.32}, {14, 13, 0.35},
+    {11, 13, 0.36}, {12, 11, 0.37}, {15, 13, 0.40}, {16, 15, 0.41}, {17, 1, 0.90}};
+
 inline auto make_sample_wim_graph(std::span<const EdgeTuple> edges) {
   auto edge_list = DirectedEdgeList<WIMEdge>{};
   edge_list.open_for_push_back();
@@ -32,6 +37,16 @@ inline auto make_sample_wim_graph(std::span<const EdgeTuple> edges) {
   }
   edge_list.close_for_push_back();
   return std::tuple{AdjacencyList<WIMEdge>{edge_list}, InvAdjacencyList<WIMEdge>{edge_list}};
+}
+
+inline auto make_sample_wbim_graph(std::span<const EdgeTuple> edges) {
+  auto edge_list = DirectedEdgeList<WBIMEdge>{};
+  edge_list.open_for_push_back();
+  for (auto [u, v, p] : edges) {
+    edge_list.push_back(u, v, {.p = p, .p_boost = std::min(2.0_ep * p, 1.0_ep)});
+  }
+  edge_list.close_for_push_back();
+  return std::tuple{AdjacencyList<WBIMEdge>{edge_list}, InvAdjacencyList<WBIMEdge>{edge_list}};
 }
 } // namespace sample_graph_details
 
@@ -49,4 +64,8 @@ inline auto make_sample_wim_graph_1_right() {
 
 inline auto make_sample_wim_graph_2() {
   return sample_graph_details::make_sample_wim_graph(sample_graph_details::SAMPLE_EDGES_2);
+}
+
+inline auto make_sample_wbim_graph_3() {
+  return sample_graph_details::make_sample_wbim_graph(sample_graph_details::SAMPLE_EDGES_3);
 }
