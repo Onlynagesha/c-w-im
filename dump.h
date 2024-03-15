@@ -23,12 +23,21 @@
 DUMP_REGISTERED_TYPES_AUTO_GENERATED(REGISTER_DUMP_FUNCTIONS_WITH_JSON)
 
 template <class T>
-concept dump_methods_registered = requires(T t) {
+concept has_dump_free_methods = requires(T t) {
   { dump(t) } -> std::same_as<std::string>;    // dump(T value)
   { dump(t, 4) } -> std::same_as<std::string>; // dump(T value, int indent)
 };
 
-template <dump_methods_registered T>
+template <class T>
+concept has_dump_member_methods = requires(T t) {
+  { t.dump() } -> std::same_as<std::string>;
+  { t.dump(4) } -> std::same_as<std::string>;
+};
+
+template <class T>
+concept has_dump_methods = has_dump_free_methods<T> || has_dump_member_methods<T>;
+
+template <has_dump_methods T>
 struct fmt::formatter<T> {
   int indent = 0;
 
@@ -45,7 +54,13 @@ struct fmt::formatter<T> {
   }
 
   auto format(const T& value, fmt::format_context& ctx) const {
-    auto dump_str = dump(value, indent);
+    auto dump_str = [&]() {
+      if constexpr (has_dump_free_methods<T>) {
+        return dump(value, indent);
+      } else {
+        return value.dump(indent);
+      }
+    }();
     auto out = ctx.out();
     return ranges::copy(dump_str, out).out;
   }

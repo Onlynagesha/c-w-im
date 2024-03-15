@@ -1,5 +1,6 @@
 #pragma once
 
+#include "utils/boost_container_common.h"
 #include <boost/container/flat_map.hpp>
 
 template <class Key, class Value, class Comp = std::less<void>>

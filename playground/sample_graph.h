@@ -54,6 +54,10 @@ inline auto make_sample_wim_graph_1() {
   return sample_graph_details::make_sample_wim_graph(sample_graph_details::SAMPLE_EDGES_1);
 }
 
+inline auto make_sample_wbim_graph_1() {
+  return sample_graph_details::make_sample_wbim_graph(sample_graph_details::SAMPLE_EDGES_1);
+}
+
 inline auto make_sample_wim_graph_1_left() {
   return sample_graph_details::make_sample_wim_graph(sample_graph_details::SAMPLE_EDGES_1_LEFT);
 }

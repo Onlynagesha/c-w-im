@@ -3,10 +3,32 @@
 #include "graph_types.h"
 #include "utils/boost_assert.h"
 #include "utils/dynamic_bitset.h"
+#include "utils/flat_set.h"
 #include "utils/graph.h"
 #include <rfl/Size.hpp>
 #include <rfl/Validator.hpp>
 #include <rfl/comparisons.hpp>
+
+#define WIM_DUMP_TYPES(F) \
+  F(PRRSketch)            \
+  F(PRRSketchSet)
+
+#define DECLARE_FREE_DUMP_FUNCTION_FOR_WIM_TYPES(Type) \
+  auto dump(const Type& obj, int indent = 0, int level = 0) noexcept -> std::string;
+
+enum class PRRSketchEdgeState { BLOCKED, LIVE, LIVE_UPON_BOOST };
+
+inline auto get_random_edge_state(const WBIMEdge& e) -> PRRSketchEdgeState {
+  BOOST_ASSERT(e.is_valid());
+  auto r = rand_float();
+  if (r < e.p) {
+    return PRRSketchEdgeState::LIVE;
+  } else if (r < e.p_boost) {
+    return PRRSketchEdgeState::LIVE_UPON_BOOST;
+  } else {
+    return PRRSketchEdgeState::BLOCKED;
+  }
+}
 
 struct VertexSet {
   std::vector<vertex_id_t> vertex_list;
@@ -47,7 +69,7 @@ struct RRSketchSet {
   // inv_sketches[v] = { i1, i2 ... }, all the RR-sketches that contain v
   std::vector<std::vector<size_t>> inv_sketches;
 
-  explicit RRSketchSet(const InvAdjacencyList<WIMEdge>* inv_graph, std::span<const vertex_weight_t> vertex_weights)
+  RRSketchSet(const InvAdjacencyList<WIMEdge>* inv_graph, std::span<const vertex_weight_t> vertex_weights)
       : inv_graph(inv_graph), center_distribution(vertex_weights.begin(), vertex_weights.end()), sketches(),
         inv_sketches() {
     BOOST_ASSERT_MSG(vertex_weights.size() == graph::num_vertices(*inv_graph),
@@ -64,58 +86,121 @@ struct RRSketchSet {
     return sketches.size();
   }
 
-  auto sketch_sizes() const {
-    return sketches | views::transform(ranges::size);
-  }
-
   auto average_sketch_size() const -> double {
     BOOST_ASSERT_MSG(!sketches.empty(), "Requires at least 1 RR-sketch to exist on calculating average size.");
-    return 1.0 * accumulate_sum(sketch_sizes()) / sketches.size();
+    return 1.0 * accumulate_sum(sketches | views::transform(ranges::size)) / sketches.size();
   }
 
   auto ratio_of_single_vertex_sketch() const -> double {
     BOOST_ASSERT_MSG(!sketches.empty(), "Requires at least 1 RR-sketch to exist on calculating average size.");
-    return 1.0 * ranges::count(sketch_sizes(), 1) / sketches.size();
-  }
-
-  auto percentage_of_single_vertex_sketch() const -> double {
-    return 100.0 * ratio_of_single_vertex_sketch();
+    return 1.0 * ranges::count(sketches | views::transform(ranges::size), 1) / sketches.size();
   }
 
   auto rr_sketch_total_size_bytes() const -> size_t {
-    auto res = sketches.capacity() * sizeof(decltype(sketches)::value_type) +
-               inv_sketches.capacity() * sizeof(decltype(inv_sketches)::value_type);
-    for (const auto& s : sketches) {
-      res += s.capacity() * sizeof(vertex_id_t);
-    }
-    for (const auto& is : inv_sketches) {
-      res += is.capacity() * sizeof(size_t);
-    }
-    return res;
+    return estimated_memory_usage(sketches) + estimated_memory_usage(inv_sketches);
   }
 
   auto rr_sketch_total_size_str() const -> std::string {
-    constexpr auto UNITS = std::array{"Bytes", "KibiBytes", "Mebibytes", "Gibibytes"};
-    auto value = static_cast<double>(rr_sketch_total_size_bytes());
-    auto unit_index = 0;
-    while (value >= 1024.0 && unit_index + 1 < UNITS.size()) {
-      value /= 1024.0;
-      unit_index += 1;
-    }
-    return fmt::format("{:.3f} {}", value, UNITS[unit_index]);
+    return size_bytes_to_memory_str(rr_sketch_total_size_bytes());
   }
 
   // Appends r new RR-sketches
   auto append(size_t n_sketches) noexcept -> void;
 
   // Selects k seed vertices
-  auto select(vertex_id_t k) noexcept -> std::vector<vertex_id_t>;
+  auto select(vertex_id_t k) const noexcept -> std::vector<vertex_id_t>;
 
-  auto dump() noexcept -> std::string;
+  auto dump() const noexcept -> std::string;
 
 private:
   // Appends a new RR-sketch
   auto append_single(std::span<vertex_id_t> vertices) noexcept -> void;
+};
+
+struct PRRSketch {
+  static constexpr auto NULL_INDEX = std::numeric_limits<vertex_id_t>::max();
+  static constexpr auto SUPER_SEED_INDEX = 0_vid;
+
+  static_assert(to_signed(NULL_INDEX) < 0,
+                "Assumption violated: as_signed(x) <= 0 is equivalent to x == 0 || x >= NULL_INDEX");
+
+  // Seed vertices BEFORE MAPPING
+  // (note: seeds are removed and then merged to a single "super seed" with index = 0)
+  FlatSet<vertex_id_t> vertices;
+  // Critical vertices (i.e. gain can be reached solely by setting the single vertex as boosted) BEFORE MAPPING
+  FlatSet<vertex_id_t> critical_vertices;
+  // The center vertex of current PRR-sketch, index BEFORE MAPPING.
+  vertex_id_t center;
+  // The center vertex of current PRR-sketch, index AFTER MAPPING.
+  vertex_id_t mapped_center;
+  // The PRR-sketch graph with edge states preserved, indices AFTER MAPPING, #0 as super seed.
+  AdjacencyList<PRRSketchEdgeState> mapped_graph;
+  // Transpose of mapped_graph, indices AFTER MAPPING
+  InvAdjacencyList<PRRSketchEdgeState> inv_mapped_graph;
+
+  auto mapped_vertex_index(vertex_id_t v) const -> vertex_id_t {
+    auto it = vertices.find(v);
+    if (it == vertices.end()) {
+      return NULL_INDEX;
+    }
+    // 1 : Mapped indices start from 1 since 0 is reserved for the "super seed"
+    return static_cast<vertex_id_t>(it - vertices.begin()) + 1;
+  }
+
+  auto dump(int indent = 0, int level = 0) const noexcept -> std::string;
+};
+
+struct PRRSketchSet {
+  static constexpr auto NULL_INDEX = PRRSketch::NULL_INDEX;
+  static constexpr auto SUPER_SEED_INDEX = PRRSketch::SUPER_SEED_INDEX;
+
+  const AdjacencyList<WBIMEdge>* graph;
+  const InvAdjacencyList<WBIMEdge>* inv_graph;
+  const VertexSet* seeds;
+  std::discrete_distribution<vertex_id_t> center_distribution;
+  // sketches[i].critical_vertices = All the critical vertices in the i-th PRR-sketch
+  std::vector<PRRSketch> sketches;
+  // For each i in inv_critical[v], v is a critical vertex in the i-th PRR-sketch
+  std::vector<std::vector<size_t>> inv_critical;
+
+  PRRSketchSet(const AdjacencyList<WBIMEdge>* graph, const InvAdjacencyList<WBIMEdge>* inv_graph,
+               std::span<const vertex_weight_t> vertex_weights, const VertexSet* seeds)
+      : graph(graph), inv_graph(inv_graph), seeds(seeds),
+        center_distribution(vertex_weights.begin(), vertex_weights.end()), sketches(), inv_critical() {
+    auto [n, m] = graph_n_m(*graph);
+    auto [ni, mi] = graph_n_m(*inv_graph);
+    BOOST_ASSERT_MSG(n == ni && m == mi, //
+                     "Mismatch between the given graph and the transpose graph.");
+    BOOST_ASSERT_MSG(vertex_weights.size() == n, //
+                     "Mismatch between # of vertices in the graph and # of vertices in the weight list.");
+    inv_critical.assign(n, std::vector<size_t>{});
+  }
+
+  PRRSketchSet(const AdjacencyListPair<WBIMEdge>* graph, const VertexSet* seeds)
+      : PRRSketchSet(&graph->adj_list, &graph->inv_adj_list, graph->vertex_weights, seeds) {}
+
+  auto n_vertices() const -> vertex_id_t {
+    return graph::num_vertices(*graph);
+  }
+
+  auto n_sketches() const -> size_t {
+    return sketches.size();
+  }
+
+  // Appends r new PRR-sketches
+  auto append(size_t n_sketches, vertex_id_t k) noexcept -> void;
+
+  // Selects k boosted vertices
+  auto select(vertex_id_t k) const noexcept -> std::vector<vertex_id_t>;
+
+  // Selects k boosted vertices by critical vertices only (which is much faster)
+  auto select_by_critical(vertex_id_t k) const noexcept -> std::vector<vertex_id_t>;
+
+  auto dump(int indent = 0, int level = 0) const noexcept -> std::string;
+
+private:
+  // Appends a new PRR-sketch of given center.
+  auto append_single(vertex_id_t center, vertex_id_t k, void* cache_raw_ptr) noexcept -> bool;
 };
 
 auto wim_simulate(const AdjacencyList<WIMEdge>& graph, const VertexSet& seeds, uint64_t try_count) noexcept
@@ -231,3 +316,7 @@ auto detect_probability_from_seeds(const InvAdjacencyList<E>& inv_graph, const V
     static_assert(rfl::always_false_v<E>, "Invalid edge type.");
   }
 }
+
+WIM_DUMP_TYPES(DECLARE_FREE_DUMP_FUNCTION_FOR_WIM_TYPES)
+
+#undef DECLARE_FREE_DUMP_FUNCTION_FOR_WIM_TYPES

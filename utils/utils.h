@@ -165,10 +165,31 @@ inline auto rand_element(Range&& range) -> ranges::range_value_t<std::remove_cvr
   return range[rand_index(ranges::size(range))];
 }
 
-template <class T>
-inline constexpr auto as_non_const(const T& value) -> T& {
-  return const_cast<T&>(value);
-}
+struct as_non_const_t {
+  template <class T>
+  constexpr auto operator()(const T& value) const -> T& {
+    return const_cast<T&>(value);
+  }
+};
+constexpr auto as_non_const = as_non_const_t{};
+
+struct to_signed_t {
+  template <std::integral T>
+  constexpr auto operator()(T value) const {
+    using S = std::make_signed_t<T>;
+    return static_cast<S>(value);
+  }
+};
+constexpr auto to_signed = to_signed_t{};
+
+struct to_unsigned_t {
+  template <std::integral T>
+  constexpr auto operator()(T value) const {
+    using U = std::make_unsigned_t<T>;
+    return static_cast<U>(value);
+  }
+};
+constexpr auto to_unsigned = to_unsigned_t{};
 
 template <std::integral IntType>
 inline constexpr auto range(IntType n) {
@@ -286,7 +307,7 @@ inline auto tuple_transform(Func&& func, TupleType&& tuple) {
 }
 
 template <class T>
-auto dump_span(std::string_view name, std::span<const T> values) -> std::string {
+inline auto dump_span(std::string_view name, std::span<const T> values) -> std::string {
   auto res = fmt::format("Elements of array '{}' (size = {}):", name, values.size());
   for (const auto& [i, x] : views::enumerate(values)) {
     res += fmt::format("\n\t{}[{}] = {}", name, i, x);
@@ -295,7 +316,7 @@ auto dump_span(std::string_view name, std::span<const T> values) -> std::string 
 }
 
 template <std::unsigned_integral T>
-auto dump_index_span(std::string_view name, std::span<const T> values) -> std::string {
+inline auto dump_index_span(std::string_view name, std::span<const T> values) -> std::string {
   auto res = fmt::format("Elements of index array '{}' (size = {}):", name, values.size());
   for (const auto& [i, x] : views::enumerate(values)) {
     if (x != static_cast<T>(-1)) {
@@ -308,13 +329,45 @@ auto dump_index_span(std::string_view name, std::span<const T> values) -> std::s
 }
 
 template <ranges::random_access_range Range>
-auto dump_array(std::string_view name, const Range& arr) -> std::string {
+inline auto dump_array(std::string_view name, const Range& arr) -> std::string {
   using ValueType = ranges::range_value_t<Range>;
   return dump_span(name, std::span<const ValueType>{arr.begin(), arr.end()});
 }
 
 template <ranges::random_access_range Range>
-auto dump_index_array(std::string_view name, const Range& arr) -> std::string {
+inline auto dump_index_array(std::string_view name, const Range& arr) -> std::string {
   using ValueType = ranges::range_value_t<Range>;
   return dump_index_span(name, std::span<const ValueType>{arr.begin(), arr.end()});
+}
+
+namespace details {
+template <class T>
+struct IsStdVector : std::false_type {};
+
+template <class T, class Alloc>
+struct IsStdVector<std::vector<T, Alloc>> : std::true_type {};
+} // namespace details
+
+inline auto size_bytes_to_memory_str(size_t size_bytes) -> std::string {
+  constexpr auto UNITS = std::array{"Bytes", "KibiBytes", "Mebibytes", "Gibibytes"};
+  auto value = static_cast<double>(size_bytes);
+  auto unit_index = 0;
+  while (value >= 1024.0 && unit_index + 1 < UNITS.size()) {
+    value /= 1024.0;
+    unit_index += 1;
+  }
+  return fmt::format("{:.3f} {}", value, UNITS[unit_index]);
+}
+
+template <class T>
+inline auto estimated_memory_usage(const std::vector<T>& vector) -> size_t {
+  auto res = sizeof(T) * vector.capacity();
+  if constexpr (details::IsStdVector<T>::value) {
+    for (const auto& inner : vector) {
+      res += estimated_memory_usage(inner);
+    }
+  } else {
+    static_assert(!ranges::range<T>, "Estimation only works for std::vector.");
+  }
+  return res;
 }

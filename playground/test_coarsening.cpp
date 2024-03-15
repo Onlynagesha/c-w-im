@@ -67,8 +67,7 @@ int main() {
                                             .edge_weight_rule = EdgeWeightRule::SEPARATE_SIMPLE,
                                             .edge_seed_weight_rule = EdgeSeedWeightRule::BEST_SEED_INDEX,
                                             .in_out_heuristic_rule = InOutHeuristicRule::P,
-                                            .vertex_weight_rule = VertexWeightRule::AVERAGE,
-                                            .seed_merging_rule = SeedMergingRule::UNUSED};
+                                            .vertex_weight_rule = VertexWeightRule::AVERAGE};
   auto expanding_params = ExpandingParams{
       .seed_expanding_rule = SeedExpandingRule::ITERATIVE, .n_iterations = 5, .simulation_try_count = 5};
 

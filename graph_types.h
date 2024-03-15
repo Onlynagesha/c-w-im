@@ -38,8 +38,7 @@ struct WBIMEdge {
   edge_probability_t p_boost;
 
   auto is_valid() const -> bool {
-    auto [p_min, p_max] = std::minmax(p, p_boost);
-    return 0.0_ep <= p_min && p_max <= 1.0_ep;
+    return 0.0_ep <= p && p <= p_boost && p_boost <= 1.0_ep;
   }
   auto rand_test(bool is_boosted) const -> bool {
     return rand_bool(is_boosted ? p_boost : p);
