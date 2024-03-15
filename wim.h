@@ -86,14 +86,18 @@ struct RRSketchSet {
     return sketches.size();
   }
 
+  auto sketch_sizes() const {
+    return sketches | views::transform(ranges::size);
+  }
+
   auto average_sketch_size() const -> double {
     BOOST_ASSERT_MSG(!sketches.empty(), "Requires at least 1 RR-sketch to exist on calculating average size.");
-    return 1.0 * accumulate_sum(sketches | views::transform(ranges::size)) / sketches.size();
+    return 1.0 * accumulate_sum(sketch_sizes()) / sketches.size();
   }
 
   auto ratio_of_single_vertex_sketch() const -> double {
     BOOST_ASSERT_MSG(!sketches.empty(), "Requires at least 1 RR-sketch to exist on calculating average size.");
-    return 1.0 * ranges::count(sketches | views::transform(ranges::size), 1) / sketches.size();
+    return 1.0 * ranges::count(sketch_sizes(), 1) / sketches.size();
   }
 
   auto rr_sketch_total_size_bytes() const -> size_t {
@@ -241,23 +245,22 @@ auto as_vertex_set(vertex_id_t n, T&& vertices) -> decltype(auto) {
 template <is_edge_property E, class VertexWeights, class SeedsOrList, class BoostedOrList>
 inline auto simulate(const AdjacencyList<E>& graph, VertexWeights&& vertex_weights, SeedsOrList&& seeds_or_list,
                      BoostedOrList&& boosted_or_list, uint64_t try_count) -> rfl::Result<double> {
-  constexpr auto USES_VERTEX_WEIGHTS =
-      same_as_either<std::remove_cvref_t<VertexWeights>, std::nullptr_t, std::nullopt_t>;
-  static_assert(USES_VERTEX_WEIGHTS || std::is_convertible_v<VertexWeights, std::span<vertex_id_t>>,
+  constexpr auto NO_VERTEX_WEIGHTS = same_as_either<std::remove_cvref_t<VertexWeights>, std::nullptr_t, std::nullopt_t>;
+  static_assert(NO_VERTEX_WEIGHTS || std::is_convertible_v<VertexWeights, std::span<const vertex_weight_t>>,
                 "Invalid vertex weight type: Expects a contiguous range of vertex_id_t, "
                 "or either of nullptr or std::nullopt as placeholder.");
 
   auto n = graph::num_vertices(graph);
   auto&& seeds = details::wim::as_vertex_set(n, seeds_or_list);
   if constexpr (std::is_same_v<E, WIMEdge>) {
-    if (USES_VERTEX_WEIGHTS) {
+    if (!NO_VERTEX_WEIGHTS) {
       return wim_simulate_w(graph, vertex_weights, seeds, try_count);
     } else {
       return wim_simulate(graph, seeds, try_count);
     }
   } else if constexpr (std::is_same_v<E, WBIMEdge>) {
     auto&& boosted_vertices = details::wim::as_vertex_set(n, boosted_or_list);
-    if (USES_VERTEX_WEIGHTS) {
+    if (!NO_VERTEX_WEIGHTS) {
       return wbim_simulate_w(graph, vertex_weights, seeds, boosted_vertices, try_count);
     } else {
       return wbim_simulate(graph, seeds, boosted_vertices, try_count);

@@ -37,7 +37,7 @@ auto get_p_values_generic(const ReadGraphParams& params, double in_deg, double o
   if constexpr (std::is_same_v<E, WIMEdge>) {
     return WIMEdge{.p = p, .p_seed = p_seed};
   } else if constexpr (std::is_same_v<E, WBIMEdge>) {
-    return WBIMEdge{.p = p, .p_seed = p_seed, .p_boost = p_boost};
+    return WBIMEdge{.p = p, .p_boost = p_boost};
   } else {
     static_assert(rfl::always_false_v<E>, "Invalid edge type.");
   }

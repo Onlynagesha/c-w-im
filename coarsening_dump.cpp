@@ -14,7 +14,7 @@
 COARSENING_DETAILS_TYPES(DEFINE_FREE_DUMP_FUNCTION_FOR_COARSENING_DETAILS)
 #undef DEFINE_FREE_DUMP_FUNCTION_FOR_COARSENING_DETAILS
 
-auto CoarsenedVertexBrief::dump(int indent, int level) const noexcept -> std::string {
+auto WIMCoarsenedVertexBrief::dump(int indent, int level) const noexcept -> std::string {
   indent = std::max(indent, 0);
   level = std::max(level, 0);
 
@@ -25,7 +25,7 @@ auto CoarsenedVertexBrief::dump(int indent, int level) const noexcept -> std::st
   return dump_utils::merge_dumped_components(components, indent, level);
 }
 
-auto CoarsenedVertexDetails::dump(int indent, int level) const noexcept -> std::string {
+auto WIMCoarsenedVertexDetails::dump(int indent, int level) const noexcept -> std::string {
   indent = std::max(indent, 0);
   level = std::max(level, 0);
 
@@ -56,7 +56,7 @@ auto CoarsenedVertexDetails::dump(int indent, int level) const noexcept -> std::
   return dump_utils::merge_dumped_components(components, indent, level);
 }
 
-auto CoarsenedEdgeDetails::dump(int indent, int level) const noexcept -> std::string {
+auto WIMCoarsenedEdgeDetails::dump(int indent, int level) const noexcept -> std::string {
   indent = std::max(indent, 0);
   level = std::max(level, 0);
 
@@ -84,7 +84,7 @@ auto CoarsenedEdgeDetails::dump(int indent, int level) const noexcept -> std::st
   return dump_utils::merge_dumped_components(components, indent, level);
 }
 
-auto CoarseningBrief::dump(int indent, int level) const noexcept -> std::string {
+auto WIMCoarseningBrief::dump(int indent, int level) const noexcept -> std::string {
   indent = std::max(indent, 0);
   level = std::max(level, 0);
 
@@ -102,7 +102,7 @@ auto CoarseningBrief::dump(int indent, int level) const noexcept -> std::string 
   return dump_utils::merge_dumped_components(components, indent, level);
 }
 
-auto CoarseningDetails::dump(int indent, int level) const noexcept -> std::string {
+auto WIMCoarseningDetails::dump(int indent, int level) const noexcept -> std::string {
   indent = std::max(indent, 0);
   level = std::max(level, 0);
 
@@ -125,8 +125,8 @@ auto CoarseningDetails::dump(int indent, int level) const noexcept -> std::strin
   return dump_utils::merge_dumped_components(components, indent, level);
 }
 
-template <same_as_either<CoarseningBrief, CoarseningDetails> DetailsType>
-auto CoarsenGraphResult<DetailsType>::dump(int indent, int level) const noexcept -> std::string {
+template <same_as_either<WIMCoarseningBrief, WIMCoarseningDetails> DetailsType>
+auto WIMCoarsenGraphResult<DetailsType>::dump(int indent, int level) const noexcept -> std::string {
   constexpr auto DECIMAL_DIGITS = 4;
 
   auto weights_width = // 1 : One position for the decimal point '.'

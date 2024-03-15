@@ -6,7 +6,7 @@
 #include <nwgraph/adaptors/edge_range.hpp>
 
 namespace {
-constexpr auto MAX_N_MEMBERS = CoarsenedVertexDetails::MAX_N_MEMBERS;
+constexpr auto MAX_N_MEMBERS = WIMCoarsenedVertexDetails::MAX_N_MEMBERS;
 constexpr auto P_NOT_ASSIGNED = -1.0_ep;
 
 using VertexPair = std::pair<vertex_id_t, vertex_id_t>;
@@ -206,7 +206,7 @@ auto get_heuristic_out_seed(const AdjacencyList<E>& graph, std::span<const verte
 }
 
 struct GetHeuristicPResult {
-  CoarsenedVertexDetails::HeuristicsContainer p;
+  WIMCoarsenedVertexDetails::HeuristicsContainer p;
   bool is_all_zero;
 
   auto normalize(InOutHeuristicRule rule) -> void {
@@ -233,27 +233,29 @@ struct GetHeuristicPResult {
   }
 };
 
-auto get_normalized_heuristic_p_in(const CoarsenedVertexDetails& gu, InOutHeuristicRule rule) -> GetHeuristicPResult {
+auto get_normalized_heuristic_p_in(const WIMCoarsenedVertexDetails& gu, InOutHeuristicRule rule)
+    -> GetHeuristicPResult {
   auto res = GetHeuristicPResult{.p = gu.heuristics_in, .is_all_zero = false};
   res.normalize(rule);
   return res;
 }
 
-auto get_normalized_heuristic_p_out(const CoarsenedVertexDetails& gu, InOutHeuristicRule rule) -> GetHeuristicPResult {
+auto get_normalized_heuristic_p_out(const WIMCoarsenedVertexDetails& gu, InOutHeuristicRule rule)
+    -> GetHeuristicPResult {
   auto res = GetHeuristicPResult{.p = gu.heuristics_out, .is_all_zero = false};
   res.normalize(rule);
   return res;
 }
 
-auto get_normalized_heuristic_p_out_seed(const CoarsenedVertexDetails& gu, InOutHeuristicRule rule)
+auto get_normalized_heuristic_p_out_seed(const WIMCoarsenedVertexDetails& gu, InOutHeuristicRule rule)
     -> GetHeuristicPResult {
   auto res = GetHeuristicPResult{.p = gu.heuristics_out_seed, .is_all_zero = false};
   res.normalize(rule);
   return res;
 }
 
-auto get_normalized_heuristic_p_in(const CoarsenedEdgeDetails& edge, const CoarsenedEdgeDetails* inv_edge,
-                                   const CoarsenedVertexDetails& gu, const CoarsenedVertexDetails& gv,
+auto get_normalized_heuristic_p_in(const WIMCoarsenedEdgeDetails& edge, const WIMCoarsenedEdgeDetails* inv_edge,
+                                   const WIMCoarsenedVertexDetails& gu, const WIMCoarsenedVertexDetails& gv,
                                    InOutHeuristicRule rule) -> GetHeuristicPResult {
   constexpr auto EPS = 1.0e-8_ep;
   auto res = GetHeuristicPResult{.p = gu.heuristics_in, .is_all_zero = false};
@@ -278,8 +280,8 @@ auto get_normalized_heuristic_p_in(const CoarsenedEdgeDetails& edge, const Coars
 
 // The probability of spread success from gu.members[j0] to any member of gv
 // is_seed: Whether the source vertex gu.members[j0] is a seed.
-auto get_merged_p_simple(const CoarsenedEdgeDetails& edge, const CoarsenedVertexDetails& gu,
-                         const CoarsenedVertexDetails& gv, size_t j0, bool is_seed) -> edge_probability_t {
+auto get_merged_p_simple(const WIMCoarsenedEdgeDetails& edge, const WIMCoarsenedVertexDetails& gu,
+                         const WIMCoarsenedVertexDetails& gv, size_t j0, bool is_seed) -> edge_probability_t {
   auto [p_cross_first, p_internal_first] =
       is_seed ? std::tie(edge.p_seed_cross, gu.p_seed_internal) : std::tie(edge.p_cross, gu.p_internal);
   auto N = gu.n_members();
@@ -324,8 +326,8 @@ auto make_initial_precise_state_container() -> PreciseStateContainer {
 // T = Subset of gu.members that have received message in all the previous turns
 // S = Subset of gu.members that receives message in the last turn.
 // Both T, S are encoded as bitset. S is always a non-empty subset of T.
-auto get_merged_p_precise_impl(const CoarsenedEdgeDetails& edge, const CoarsenedVertexDetails& gu,
-                               const CoarsenedVertexDetails& gv, PreciseStateContainer& F, size_t T, size_t S)
+auto get_merged_p_precise_impl(const WIMCoarsenedEdgeDetails& edge, const WIMCoarsenedVertexDetails& gu,
+                               const WIMCoarsenedVertexDetails& gv, PreciseStateContainer& F, size_t T, size_t S)
     -> edge_probability_t {
   auto N = gu.n_members();
   auto U = (1zu << N) - 1; // U = Universal set
@@ -377,20 +379,20 @@ auto get_merged_p_precise_impl(const CoarsenedEdgeDetails& edge, const Coarsened
   return F[T][S] = p_success_in_this_turn + (1.0_ep - p_success_in_this_turn) * sum;
 }
 
-auto get_merged_p_precise(const CoarsenedEdgeDetails& edge, const CoarsenedVertexDetails& gu,
-                          const CoarsenedVertexDetails& gv, size_t j_bitset) -> edge_probability_t {
+auto get_merged_p_precise(const WIMCoarsenedEdgeDetails& edge, const WIMCoarsenedVertexDetails& gu,
+                          const WIMCoarsenedVertexDetails& gv, size_t j_bitset) -> edge_probability_t {
   auto F = make_initial_precise_state_container();
   return get_merged_p_precise_impl(edge, gu, gv, F, j_bitset, j_bitset);
 }
 
-auto get_merged_p_precise(const CoarsenedEdgeDetails& edge, const CoarsenedVertexDetails& gu,
-                          const CoarsenedVertexDetails& gv, PreciseStateContainer& F, size_t j_bitset)
+auto get_merged_p_precise(const WIMCoarsenedEdgeDetails& edge, const WIMCoarsenedVertexDetails& gu,
+                          const WIMCoarsenedVertexDetails& gv, PreciseStateContainer& F, size_t j_bitset)
     -> edge_probability_t {
   return get_merged_p_precise_impl(edge, gu, gv, F, j_bitset, j_bitset);
 }
 
-auto merge_coarsened_wim_graph_edge(CoarsenedEdgeDetails& dest, const CoarsenedEdgeDetails* inv_dest,
-                                    const CoarsenedVertexDetails& gu, const CoarsenedVertexDetails& gv,
+auto merge_coarsened_wim_graph_edge(WIMCoarsenedEdgeDetails& dest, const WIMCoarsenedEdgeDetails* inv_dest,
+                                    const WIMCoarsenedVertexDetails& gu, const WIMCoarsenedVertexDetails& gv,
                                     const CoarseningParams& params) -> void {
   auto N = gu.n_members();
   // Special case: Gu has only 1 member {u}
@@ -507,7 +509,7 @@ struct EdgeCoarseningItemInfo {
   }
 };
 
-auto get_coarsened_wim_graph_edges(AdjacencyList<WIMEdge>& graph, const CoarseningDetails& details,
+auto get_coarsened_wim_graph_edges(AdjacencyList<WIMEdge>& graph, const WIMCoarseningDetails& details,
                                    const CoarseningParams& params) -> DirectedEdgeList<WIMEdge> {
   using ItemInfo = EdgeCoarseningItemInfo;
   using ItemType = VertexPairWithValue<const ItemInfo*>;
@@ -545,8 +547,8 @@ auto get_coarsened_wim_graph_edges(AdjacencyList<WIMEdge>& graph, const Coarseni
   for (auto chunk : items | CHUNK_BY_VIEW(_1.u == _2.u && _1.v == _2.v)) {
     auto [gu, gv] = chunk[0].vertices();
     auto [Mu, Mv] = details.group_id_to_size(gu, gv);
-    auto E_uv = CoarsenedEdgeDetails{.n_members_left = Mu, .n_members_right = Mv}; // Gu -> Gv
-    auto E_vu = CoarsenedEdgeDetails{.n_members_left = Mv, .n_members_right = Mu}; // Gv -> Gu
+    auto E_uv = WIMCoarsenedEdgeDetails{.n_members_left = Mu, .n_members_right = Mv}; // Gu -> Gv
+    auto E_vu = WIMCoarsenedEdgeDetails{.n_members_left = Mv, .n_members_right = Mu}; // Gv -> Gu
 
     auto has_uv = false;
     auto has_vu = false;
@@ -579,8 +581,8 @@ auto get_coarsened_wim_graph_edges(AdjacencyList<WIMEdge>& graph, const Coarseni
   return res;
 }
 
-auto get_coarsened_wim_graph_vertex_weights(const CoarseningDetails& details,
-                                            std::span<const vertex_weight_t> vertex_weights,
+template <random_access_range_of<vertex_weight_t> VertexWeights>
+auto get_coarsened_wim_graph_vertex_weights(const WIMCoarseningDetails& details, VertexWeights&& vertex_weights,
                                             const CoarseningParams& params) -> std::vector<vertex_weight_t> {
   auto coarsened_vertex_weights = std::vector<vertex_weight_t>(details.n_coarsened, 0.0);
   // vc = Coarsened vertex index in range [0, Nc)
@@ -626,19 +628,21 @@ auto get_coarsened_wim_graph_vertex_weights(const CoarseningDetails& details,
   return coarsened_vertex_weights;
 }
 
-template <class ResultType>
+template <class ResultType, random_access_range_of<vertex_weight_t> VertexWeights>
 auto coarsen_wim_graph_w_impl(AdjacencyList<WIMEdge>& graph, InvAdjacencyList<WIMEdge>& inv_graph,
-                              std::span<const vertex_weight_t> vertex_weights,             //
-                              vertex_id_t n_groups, std::span<const vertex_id_t> group_id, //
+                              VertexWeights&& vertex_weights, vertex_id_t n_groups,
+                              std::span<const vertex_id_t> group_id, //
                               const CoarseningParams& params) noexcept -> ResultType {
   MYLOG_FMT_DEBUG("Parameters: {:4}", params);
   auto n = graph::num_vertices(graph);
   // d_in: unit weight by default
-  auto details = CoarseningDetails{.n = n,
-                                   .n_coarsened = n_groups,
-                                   .group_id = std::vector(group_id.begin(), group_id.end()),
-                                   .index_in_group = std::vector<vertex_id_t>(n),
-                                   .groups = std::vector<CoarsenedVertexDetails>(n_groups)};
+  auto details = WIMCoarseningDetails{
+      .n = n,
+      .n_coarsened = n_groups,
+      .group_id = std::vector(group_id.begin(), group_id.end()),
+      .index_in_group = std::vector<vertex_id_t>(n),
+      .groups = std::vector<WIMCoarsenedVertexDetails>(n_groups),
+  };
   MYLOG_FMT_DEBUG("Starts coarsening: n = {}, n_groups = {}", details.n, details.n_coarsened);
 
   auto total_time_used = 0.0;
@@ -701,13 +705,13 @@ auto coarsen_wim_graph_w_impl(AdjacencyList<WIMEdge>& graph, InvAdjacencyList<WI
   });
 
   auto res_details = [&]() {
-    if constexpr (std::is_same_v<ResultType, CoarsenGraphDetailedResult>) {
+    if constexpr (std::is_same_v<ResultType, WIMCoarsenGraphDetailedResult>) {
       // Returns the details directly
       return std::move(details);
-    } else if constexpr (std::is_same_v<ResultType, CoarsenGraphBriefResult>) {
+    } else if constexpr (std::is_same_v<ResultType, WIMCoarsenGraphBriefResult>) {
       // Transforms detailed to brief information
-      auto brief = CoarseningBrief{
-          .n = n, .n_coarsened = n_groups, .groups = make_reserved_vector<CoarsenedVertexBrief>(n_groups)};
+      auto brief = WIMCoarseningBrief{
+          .n = n, .n_coarsened = n_groups, .groups = make_reserved_vector<WIMCoarsenedVertexBrief>(n_groups)};
       for (const auto& u : details.groups) {
         brief.groups.push_back({.members = u.members, .best_seed_index = u.best_seed_index});
       }
@@ -728,32 +732,57 @@ auto coarsen_wim_graph_w_impl(AdjacencyList<WIMEdge>& graph, InvAdjacencyList<WI
 }
 
 template <class ResultType>
+auto coarsen_wim_graph_by_match_generic(const AdjacencyList<WIMEdge>& graph, const InvAdjacencyList<WIMEdge>& inv_graph,
+                                        std::span<const vertex_weight_t> vertex_weights, vertex_id_t n_groups,
+                                        std::span<const vertex_id_t> group_id, const CoarseningParams& params) noexcept
+    -> rfl::Result<ResultType> {
+  auto n = graph::num_vertices(graph);
+  if (vertex_weights.empty()) {
+    return coarsen_wim_graph_w_impl<ResultType>( //
+        as_non_const(graph), as_non_const(inv_graph), views::repeat(1.0_vw, n), n_groups, group_id, params);
+  } else if (vertex_weights.size() != n) {
+    constexpr auto msg_pattern = "Size mismatch between vertex weights (which is {}) and |V| (which is {})";
+    return rfl::Error{fmt::format(msg_pattern, vertex_weights.size(), n)};
+  }
+  return coarsen_wim_graph_w_impl<ResultType>( //
+      as_non_const(graph), as_non_const(inv_graph), vertex_weights, n_groups, group_id, params);
+}
+
+template <class ResultType, random_access_range_of<vertex_weight_t> VertexWeights>
 auto coarsen_wim_graph_w_framework(const AdjacencyList<WIMEdge>& graph, const InvAdjacencyList<WIMEdge>& inv_graph,
-                                   std::span<const vertex_weight_t> vertex_weights,
-                                   const CoarseningParams& params) noexcept -> ResultType {
-  // Step 1:
-  MYLOG_FMT_DEBUG("Coarsening: |V|, |E| of graph = {}; |V|, |E| of inv_graph = {}; Size of vertex_weights = {}", //
-                  graph_n_m(graph), graph_n_m(inv_graph), vertex_weights.size());
+                                   VertexWeights&& vertex_weights, const CoarseningParams& params)
+    -> rfl::Result<ResultType> {
+  // Checking
+  auto [n, m] = graph_n_m(graph);
+  if (vertex_weights.size() != 0 && vertex_weights.size() != n) {
+    constexpr auto msg_pattern = "Size mismatch between vertex weights (which is {}) and |V| (which is {})";
+    return rfl::Error{fmt::format(msg_pattern, vertex_weights.size(), n)};
+  }
   auto bidir_graph = merge_wim_edge_to_undirected(graph, params);
-  MYLOG_FMT_DEBUG("Coarsening: |V|, |E| of bidir_graph = {}", graph_n_m(bidir_graph));
-  // Step 2
   auto [n_groups, group_id] = mongoose_match(bidir_graph, params);
-  MYLOG_FMT_DEBUG("Coarsening: n_groups = {}; Size of group_id = {}", n_groups, group_id.size());
-  // Step 3
-  return coarsen_wim_graph_w_impl<ResultType>(as_non_const(graph), as_non_const(inv_graph), //
-                                              vertex_weights, n_groups, group_id, params);
+  return coarsen_wim_graph_by_match_generic<ResultType>(graph, inv_graph, vertex_weights, n_groups, group_id, params);
 }
 
 template <class CoarsenResultType>
-auto expand_wim_seed_vertices_w_impl(const AdjacencyList<WIMEdge>& graph,
-                                     std::span<const vertex_weight_t> vertex_weights,
-                                     const CoarsenResultType& coarsening_result,
-                                     std::span<const vertex_id_t> coarsened_seeds,
-                                     const ExpandingParams& params) noexcept -> rfl::Result<ExpandSeedResult> {
+auto expand_wim_seed_vertices_impl(const AdjacencyList<WIMEdge>& graph, std::span<const vertex_weight_t> vertex_weights,
+                                   const CoarsenResultType& coarsening_result,
+                                   std::span<const vertex_id_t> coarsened_seeds, const ExpandingParams& params) noexcept
+    -> rfl::Result<ExpandSeedResult> {
   auto n = coarsening_result.details.n;            // # of vertices BEFORE coarsening
   auto nc = coarsening_result.details.n_coarsened; // # of vertices AFTER coarsening
   BOOST_ASSERT_MSG(ranges::size(coarsened_seeds) <= nc, "Expects more than nc vertices as seeds");
   BOOST_ASSERT_MSG(ranges::max(coarsened_seeds) < nc, "Indices of seeds are out of range [0, nc).");
+
+  auto fallback_vertex_weights = std::vector<vertex_weight_t>{};
+  if (vertex_weights.empty()) {
+    // If no vertex weight is provided, a list of unit weights is provided
+    fallback_vertex_weights.assign(n, 1.0_vw);
+    vertex_weights = fallback_vertex_weights;
+  } else if (vertex_weights.size() != n) {
+    // Raises an error on size mismatch
+    constexpr auto msg_pattern = "Size mismatch between vertex weights (which is {}) and |V| (which is {})";
+    return rfl::Error{fmt::format(msg_pattern, vertex_weights.size(), n)};
+  }
 
   auto expanded_seeds = make_reserved_vector<vertex_id_t>(coarsened_seeds.size());
   auto make_expanded_seeds_as_s_local = [&]() {
@@ -790,6 +819,7 @@ auto expand_wim_seed_vertices_w_impl(const AdjacencyList<WIMEdge>& graph,
     auto sim_res = simulate(graph, vertex_weights, expanded_seeds, nullptr, **params.simulation_try_count);
     RFL_RETURN_ON_ERROR(sim_res);
     MYLOG_FMT_DEBUG("Initial expanded seed set: {}\n\tWith simulation result = {:.4f}", expanded_seeds, *sim_res);
+
     // Changable only of at least 2 vertices in the group that is expanded from the coarsened seed vertex.
     auto changable_group_indices = std::vector<size_t>{};
     for (auto [i, sc] : coarsened_seeds | views::enumerate) {
@@ -799,7 +829,7 @@ auto expand_wim_seed_vertices_w_impl(const AdjacencyList<WIMEdge>& graph,
     }
     // Special case: each coarsened seed is expanded to only 1 vertex.
     if (changable_group_indices.empty()) {
-      goto expand_wim_seed_vertices_w_return;
+      goto expand_wim_seed_vertices_impl_return;
     }
     // Each iteration randomly changes one seed vertex
     for (auto iteration_index : range(**params.n_iterations)) {
@@ -817,13 +847,13 @@ auto expand_wim_seed_vertices_w_impl(const AdjacencyList<WIMEdge>& graph,
         }
         return std::tuple{expanded_seeds[si], res};
       }();
-      MYLOG_FMT_DEBUG("Iteration #{}: Attempting to change {} to {} (in group {} coarsened to vertex #{})",
+      MYLOG_FMT_DEBUG("Iteration #{}: Attempting to change {} to {} (in group {} coarsened to vertex #{})", //
                       iteration_index, prev, next, group.members, coarsened_seeds[si]);
       expanded_seeds[si] = next;
       auto next_sim_res = simulate(graph, vertex_weights, expanded_seeds, nullptr, **params.simulation_try_count);
       RFL_RETURN_ON_ERROR(next_sim_res);
-      MYLOG_FMT_DEBUG("Iteration #{}: Candidate {} vs. {}: Simulation result: {:.4f} vs. {:.4f}", iteration_index, next,
-                      prev, *next_sim_res, *sim_res);
+      MYLOG_FMT_DEBUG("Iteration #{}: Candidate {} vs. {}: Simulation result: {:.4f} vs. {:.4f}", //
+                      iteration_index, next, prev, *next_sim_res, *sim_res);
       if (*next_sim_res > *sim_res) {
         sim_res = next_sim_res; // Changes prev to next
       } else {
@@ -832,7 +862,7 @@ auto expand_wim_seed_vertices_w_impl(const AdjacencyList<WIMEdge>& graph,
       MYLOG_FMT_DEBUG("Expanded seed set after iteration #{}: {}", iteration_index, expanded_seeds);
     }
   }
-expand_wim_seed_vertices_w_return:
+expand_wim_seed_vertices_impl_return:
   return ExpandSeedResult{.expanded_seeds = std::move(expanded_seeds)};
 }
 } // namespace
@@ -855,11 +885,11 @@ auto merge_wbim_edge_to_undirected(const AdjacencyList<WBIMEdge>& graph, const C
 
 auto mongoose_match(const AdjacencyList<edge_probability_t>& graph, const CoarseningParams& params) noexcept
     -> MongooseMatchResult {
-  return mongoose_match_with_seeds(graph, {}, params);
+  return mongoose_match_s(graph, {}, params);
 }
 
-auto mongoose_match_with_seeds(const AdjacencyList<edge_probability_t>& graph, std::span<const vertex_id_t> seeds,
-                               const CoarseningParams& params) noexcept -> MongooseMatchResult {
+auto mongoose_match_s(const AdjacencyList<edge_probability_t>& graph, std::span<const vertex_id_t> seeds,
+                      const CoarseningParams& params) noexcept -> MongooseMatchResult {
   auto n = graph::num_vertices(graph);
   auto seq = std::vector<vertex_id_t>(n);
   std::ranges::iota(seq, 0);
@@ -1002,69 +1032,37 @@ auto mongoose_match_with_seeds(const AdjacencyList<edge_probability_t>& graph, s
 
 // ---- Step 3 ----
 
-auto coarsen_wim_graph_with_match_result(const AdjacencyList<WIMEdge>& graph,
-                                         const InvAdjacencyList<WIMEdge>& inv_graph, vertex_id_t n_groups,
-                                         std::span<const vertex_id_t> group_id, //
-                                         const CoarseningParams& params) noexcept -> CoarsenGraphBriefResult {
-  auto vertex_weights = std::vector<vertex_weight_t>(graph::num_vertices(graph), 1.0);
-  return coarsen_wim_graph_with_match_result_w(graph, inv_graph, vertex_weights, n_groups, group_id, params);
+auto coarsen_wim_graph_by_match(const AdjacencyList<WIMEdge>& graph, const InvAdjacencyList<WIMEdge>& inv_graph,
+                                std::span<const vertex_weight_t> vertex_weights, vertex_id_t n_groups,
+                                std::span<const vertex_id_t> group_id, const CoarseningParams& params) noexcept
+    -> rfl::Result<WIMCoarsenGraphBriefResult> {
+  return coarsen_wim_graph_by_match_generic<WIMCoarsenGraphBriefResult>( //
+      graph, inv_graph, vertex_weights, n_groups, group_id, params);
 }
 
-auto coarsen_wim_graph_with_match_result_w(const AdjacencyList<WIMEdge>& graph,
-                                           const InvAdjacencyList<WIMEdge>& inv_graph,
-                                           std::span<const vertex_weight_t> vertex_weights, vertex_id_t n_groups,
-                                           std::span<const vertex_id_t> group_id,
-                                           const CoarseningParams& params) noexcept -> CoarsenGraphBriefResult {
-  return coarsen_wim_graph_w_impl<CoarsenGraphBriefResult>(const_cast<AdjacencyList<WIMEdge>&>(graph),
-                                                           const_cast<InvAdjacencyList<WIMEdge>&>(inv_graph),
-                                                           vertex_weights, n_groups, group_id, params);
-}
-
-auto coarsen_wim_graph_with_match_result_d(const AdjacencyList<WIMEdge>& graph,
-                                           const InvAdjacencyList<WIMEdge>& inv_graph, vertex_id_t n_groups,
-                                           std::span<const vertex_id_t> group_id,
-                                           const CoarseningParams& params) noexcept -> CoarsenGraphDetailedResult {
-  auto vertex_weights = std::vector<vertex_weight_t>(graph::num_vertices(graph), 1.0);
-  return coarsen_wim_graph_with_match_result_d_w(graph, inv_graph, vertex_weights, n_groups, group_id, params);
-}
-
-auto coarsen_wim_graph_with_match_result_d_w(const AdjacencyList<WIMEdge>& graph,
-                                             const InvAdjacencyList<WIMEdge>& inv_graph,
-                                             std::span<const vertex_weight_t> vertex_weights, vertex_id_t n_groups,
-                                             std::span<const vertex_id_t> group_id,
-                                             const CoarseningParams& params) noexcept -> CoarsenGraphDetailedResult {
-  return coarsen_wim_graph_w_impl<CoarsenGraphDetailedResult>(const_cast<AdjacencyList<WIMEdge>&>(graph),
-                                                              const_cast<InvAdjacencyList<WIMEdge>&>(inv_graph),
-                                                              vertex_weights, n_groups, group_id, params);
+auto coarsen_wim_graph_by_match_d(const AdjacencyList<WIMEdge>& graph, const InvAdjacencyList<WIMEdge>& inv_graph,
+                                  std::span<const vertex_weight_t> vertex_weights, vertex_id_t n_groups,
+                                  std::span<const vertex_id_t> group_id, const CoarseningParams& params) noexcept
+    -> rfl::Result<WIMCoarsenGraphDetailedResult> {
+  return coarsen_wim_graph_by_match_generic<WIMCoarsenGraphDetailedResult>( //
+      graph, inv_graph, vertex_weights, n_groups, group_id, params);
 }
 
 auto coarsen_wim_graph(const AdjacencyList<WIMEdge>& graph, const InvAdjacencyList<WIMEdge>& inv_graph,
-                       const CoarseningParams& params) noexcept -> CoarsenGraphBriefResult {
-  auto vertex_weights = std::vector<vertex_weight_t>(graph::num_vertices(graph), 1.0);
-  return coarsen_wim_graph_w(graph, inv_graph, vertex_weights, params);
-}
-
-auto coarsen_wim_graph_w(const AdjacencyList<WIMEdge>& graph, const InvAdjacencyList<WIMEdge>& inv_graph,
-                         std::span<const vertex_weight_t> vertex_weights, const CoarseningParams& params) noexcept
-    -> CoarsenGraphBriefResult {
-  return coarsen_wim_graph_w_framework<CoarsenGraphBriefResult>(graph, inv_graph, vertex_weights, params);
+                       std::span<const vertex_weight_t> vertex_weights, const CoarseningParams& params) noexcept
+    -> rfl::Result<WIMCoarsenGraphBriefResult> {
+  return coarsen_wim_graph_w_framework<WIMCoarsenGraphBriefResult>(graph, inv_graph, vertex_weights, params);
 }
 
 auto coarsen_wim_graph_d(const AdjacencyList<WIMEdge>& graph, const InvAdjacencyList<WIMEdge>& inv_graph,
-                         const CoarseningParams& params) noexcept -> CoarsenGraphDetailedResult {
-  auto vertex_weights = std::vector<vertex_weight_t>(graph::num_vertices(graph), 1.0);
-  return coarsen_wim_graph_d_w(graph, inv_graph, vertex_weights, params);
-}
-
-auto coarsen_wim_graph_d_w(const AdjacencyList<WIMEdge>& graph, const InvAdjacencyList<WIMEdge>& inv_graph,
-                           std::span<const vertex_weight_t> vertex_weights, const CoarseningParams& params) noexcept
-    -> CoarsenGraphDetailedResult {
-  return coarsen_wim_graph_w_framework<CoarsenGraphDetailedResult>(graph, inv_graph, vertex_weights, params);
+                         std::span<const vertex_weight_t> vertex_weights, const CoarseningParams& params) noexcept
+    -> rfl::Result<WIMCoarsenGraphDetailedResult> {
+  return coarsen_wim_graph_w_framework<WIMCoarsenGraphDetailedResult>(graph, inv_graph, vertex_weights, params);
 }
 
 // ---- Step 4 ----
 
-auto select_best_seed_in_group(const CoarsenedVertexDetails& v, InOutHeuristicRule rule) noexcept
+auto select_best_seed_in_group(const WIMCoarsenedVertexDetails& v, InOutHeuristicRule rule) noexcept
     -> SelectBestSeedResult {
   auto m = v.members.size();
   if (m == 1) {
@@ -1100,47 +1098,16 @@ auto select_best_seed_in_group(const CoarsenedVertexDetails& v, InOutHeuristicRu
   return {.index_in_group = static_cast<size_t>(ranges::max_element(estimated_gain) - estimated_gain.begin())};
 }
 
-auto expand_wim_seed_vertices(const AdjacencyList<WIMEdge>& graph, const CoarsenGraphBriefResult& coarsening_result,
+auto expand_wim_seed_vertices(const AdjacencyList<WIMEdge>& graph, std::span<const vertex_weight_t> vertex_weights,
+                              const WIMCoarsenGraphBriefResult& coarsening_result,
                               std::span<const vertex_id_t> coarsened_seeds, const ExpandingParams& params) noexcept
     -> rfl::Result<ExpandSeedResult> {
-  auto vertex_weights = std::vector<vertex_weight_t>(graph::num_vertices(graph), 1.0);
-  return expand_wim_seed_vertices_w(graph, vertex_weights, coarsening_result, coarsened_seeds, params);
+  return expand_wim_seed_vertices_impl(graph, vertex_weights, coarsening_result, coarsened_seeds, params);
 }
 
-auto expand_wim_seed_vertices_w(const AdjacencyList<WIMEdge>& graph, std::span<const vertex_weight_t> vertex_weights,
-                                const CoarsenGraphBriefResult& coarsening_result,
+auto expand_wim_seed_vertices_d(const AdjacencyList<WIMEdge>& graph, std::span<const vertex_weight_t> vertex_weights,
+                                const WIMCoarsenGraphDetailedResult& coarsening_result,
                                 std::span<const vertex_id_t> coarsened_seeds, const ExpandingParams& params) noexcept
     -> rfl::Result<ExpandSeedResult> {
-  return expand_wim_seed_vertices_w_impl(graph, vertex_weights, coarsening_result, coarsened_seeds, params);
-}
-
-auto further_expand_wim_seed_vertices(const CoarsenGraphBriefResult& last_result,
-                                      const CoarsenGraphBriefResult& cur_result,
-                                      std::span<const vertex_id_t> coarsened_seeds,
-                                      const ExpandingParams& params) noexcept -> rfl::Result<ExpandSeedResult> {
-  return expand_wim_seed_vertices_w(last_result.coarsened.adj_list, last_result.coarsened.vertex_weights, cur_result,
-                                    coarsened_seeds, params);
-}
-
-auto expand_wim_seed_vertices_d(const AdjacencyList<WIMEdge>& graph,
-                                const CoarsenGraphDetailedResult& coarsening_result,
-                                std::span<const vertex_id_t> coarsened_seeds, const ExpandingParams& params) noexcept
-    -> rfl::Result<ExpandSeedResult> {
-  auto vertex_weights = std::vector<vertex_weight_t>(graph::num_vertices(graph), 1.0);
-  return expand_wim_seed_vertices_d_w(graph, vertex_weights, coarsening_result, coarsened_seeds, params);
-}
-
-auto expand_wim_seed_vertices_d_w(const AdjacencyList<WIMEdge>& graph, std::span<const vertex_weight_t> vertex_weights,
-                                  const CoarsenGraphDetailedResult& coarsening_result,
-                                  std::span<const vertex_id_t> coarsened_seeds, const ExpandingParams& params) noexcept
-    -> rfl::Result<ExpandSeedResult> {
-  return expand_wim_seed_vertices_w_impl(graph, vertex_weights, coarsening_result, coarsened_seeds, params);
-}
-
-auto further_expand_wim_seed_vertices_d(const CoarsenGraphDetailedResult& last_result,
-                                        const CoarsenGraphDetailedResult& cur_result,
-                                        std::span<const vertex_id_t> coarsened_seeds,
-                                        const ExpandingParams& params) noexcept -> rfl::Result<ExpandSeedResult> {
-  return expand_wim_seed_vertices_d_w(last_result.coarsened.adj_list, last_result.coarsened.vertex_weights, cur_result,
-                                      coarsened_seeds, params);
+  return expand_wim_seed_vertices_impl(graph, vertex_weights, coarsening_result, coarsened_seeds, params);
 }

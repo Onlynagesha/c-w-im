@@ -63,11 +63,13 @@ int main() {
     return std::vector<vertex_weight_t>(view.begin(), view.end());
   }();
 
-  auto coarsening_params = CoarseningParams{.neighbor_match_rule = NeighborMatchRule::LEM_P_PRODUCT,
-                                            .edge_weight_rule = EdgeWeightRule::SEPARATE_SIMPLE,
-                                            .edge_seed_weight_rule = EdgeSeedWeightRule::BEST_SEED_INDEX,
-                                            .in_out_heuristic_rule = InOutHeuristicRule::P,
-                                            .vertex_weight_rule = VertexWeightRule::AVERAGE};
+  auto coarsening_params = CoarseningParams{
+      .neighbor_match_rule = NeighborMatchRule::LEM_P_PRODUCT,
+      .edge_weight_rule = EdgeWeightRule::SEPARATE_SIMPLE,
+      .edge_seed_weight_rule = EdgeSeedWeightRule::BEST_SEED_INDEX,
+      .in_out_heuristic_rule = InOutHeuristicRule::P,
+      .vertex_weight_rule = VertexWeightRule::AVERAGE,
+  };
   auto expanding_params = ExpandingParams{
       .seed_expanding_rule = SeedExpandingRule::ITERATIVE, .n_iterations = 5, .simulation_try_count = 5};
 
@@ -85,13 +87,13 @@ int main() {
   auto group_id = std::vector<vertex_id_t>{0, 1, 2, 0, 1, 2, 0, 1, 2, 3};
   // auto [n_groups, group_id] = mongoose_match(bidir_graph, coarsening_params);
 
-  auto brief_res = coarsen_wim_graph_with_match_result_w( //
+  auto brief_res = coarsen_wim_graph_by_match( //
       graph, inv_graph, vertex_weights, n_groups, group_id, coarsening_params);
-  ELOGFMT(INFO, "Brief coarsening result: {:4}", brief_res);
+  ELOGFMT(INFO, "Brief coarsening result: {:4}", *brief_res);
 
-  auto detailed_res = coarsen_wim_graph_with_match_result_d_w( //
+  auto detailed_res = coarsen_wim_graph_by_match_d( //
       graph, inv_graph, vertex_weights, n_groups, group_id, coarsening_params);
-  ELOGFMT(INFO, "Detailed coarsening result: {:4}", detailed_res);
+  ELOGFMT(INFO, "Detailed coarsening result: {:4}", *detailed_res);
 
   auto [graph_left, inv_graph_left] = make_sample_wim_graph_1_left();
   ELOG_INFO << "Testing left part with simulation:";

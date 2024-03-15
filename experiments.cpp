@@ -236,7 +236,7 @@ auto do_wim_experiment_get_seeds(const WIMAdjacencyListPair& graph, const Common
             r, r_new,                                               // {0}, {1}
             rr_sketches_total_time_used, rr_sketches_new_time_used, // {2}, {3}
             avg_sketch_size,                                        // {4}
-            rr_sketches.percentage_of_single_vertex_sketch(),       // {5}
+            rr_sketches.ratio_of_single_vertex_sketch() * 100.0,    // {5}
             rr_sketches.rr_sketch_total_size_str()                  // {6}
     );
     // Histogram of the distribution of RR-sketch size
@@ -361,27 +361,29 @@ Example of the resulted json_root: {
 *json_time_used = (a floating point value, time used in seconds)
 */
 auto do_continue_coarsening_graph(const WIMAdjacencyListPair& original_graph,
-                                  std::vector<CoarsenGraphBriefResult>& coarsen_results, vertex_id_t destination_level,
-                                  vertex_id_t coarsening_threshold, const CoarseningParams& params,
-                                  json* json_root = nullptr, json* json_time_used = nullptr) -> void {
+                                  std::vector<WIMCoarsenGraphBriefResult>& coarsen_results,
+                                  vertex_id_t destination_level, vertex_id_t coarsening_threshold,
+                                  const CoarseningParams& params, json* json_root = nullptr,
+                                  json* json_time_used = nullptr) -> ResultVoid {
   ASSERT_JSON_OBJECT_PTR(json_root);
 
   auto initial_level = static_cast<vertex_id_t>(coarsen_results.size());
   if (initial_level >= destination_level) {
-    return; // No need to coarsen the graph
+    return RESULT_VOID_SUCCESS; // No need to coarsen the graph
   }
   auto n_coarsened = (initial_level == 0) ? original_graph.n_vertices() : coarsen_results.back().coarsened.n_vertices();
 
   auto timer = nw::util::seconds_timer{};
   timer.start();
   for (auto level = initial_level + 1; n_coarsened > coarsening_threshold && level <= destination_level; level++) {
-    auto cur_result = [&]() {
+    auto cur_result = [&]() -> rfl::Result<const WIMCoarsenGraphBriefResult*> {
       auto item = (level <= 1) ? coarsen_wim_graph_p(original_graph, params)
                                : coarsen_wim_graph_p(coarsen_results.back().coarsened, params);
-      return &coarsen_results.emplace_back(std::move(item));
+      return item.transform([&](const auto& item) { return &coarsen_results.emplace_back(std::move(item)); });
     }();
-    n_coarsened = cur_result->details.n_coarsened;
-    ELOGFMT(INFO, "Finishes coarsening level {}: |V|, |E| = {}", level, cur_result->coarsened.graph_n_m());
+    RFL_RETURN_ON_ERROR(cur_result);
+    n_coarsened = (*cur_result)->details.n_coarsened;
+    ELOGFMT(INFO, "Finishes coarsening level {}: |V|, |E| = {}", level, (*cur_result)->coarsened.graph_n_m());
   }
   auto time_used = timer.lap();
   ELOGFMT(INFO, "Finishes coarsening from level {} to {}: Time used = {:.3f} sec.", //
@@ -396,13 +398,15 @@ auto do_continue_coarsening_graph(const WIMAdjacencyListPair& original_graph,
   if (json_time_used != nullptr) {
     *json_time_used = time_used;
   }
+  return RESULT_VOID_SUCCESS;
 }
 
 auto do_coarsen_graph(const WIMAdjacencyListPair& graph, vertex_id_t destination_level,
                       vertex_id_t coarsening_threshold, const CoarseningParams& params, json* json_root = nullptr,
-                      json* json_time_used = nullptr) -> std::vector<CoarsenGraphBriefResult> {
-  auto res = make_reserved_vector<CoarsenGraphBriefResult>(destination_level);
-  do_continue_coarsening_graph(graph, res, destination_level, coarsening_threshold, params, json_root, json_time_used);
+                      json* json_time_used = nullptr) -> rfl::Result<std::vector<WIMCoarsenGraphBriefResult>> {
+  auto res = make_reserved_vector<WIMCoarsenGraphBriefResult>(destination_level);
+  RFL_RETURN_ON_ERROR(do_continue_coarsening_graph( //
+      graph, res, destination_level, coarsening_threshold, params, json_root, json_time_used));
   return res;
 }
 
@@ -413,7 +417,7 @@ Returns the expanded seed list.
 *json_time_used <- A floating point value, time used in seconds
 */
 auto do_expand_seeds(const WIMAdjacencyListPair& original_graph,
-                     std::span<const CoarsenGraphBriefResult> coarsen_results, VertexList seeds,
+                     std::span<const WIMCoarsenGraphBriefResult> coarsen_results, VertexList seeds,
                      vertex_id_t n_fast_expanding_levels, const ExpandingParams& raw_params,
                      json* json_expanded_seeds = nullptr, json* json_time_used = nullptr) -> rfl::Result<VertexList> {
   auto level = static_cast<vertex_id_t>(coarsen_results.size());
@@ -436,7 +440,7 @@ auto do_expand_seeds(const WIMAdjacencyListPair& original_graph,
     }();
     auto expand_res = [&]() {
       if (back_level == 0) {
-        return expand_wim_seed_vertices_w(adj_list, vertex_weights, coarsen_results[0], seeds, *params_to_use);
+        return expand_wim_seed_vertices(adj_list, vertex_weights, coarsen_results[0], seeds, *params_to_use);
       }
       auto& prev = coarsen_results[back_level - 1];
       auto& cur = coarsen_results[back_level];
@@ -468,7 +472,7 @@ Example of the resulted json_time_used: "expand_seeds": [
   { “r": 10000, "seconds": 1.02}
 ], */
 auto do_coarsening_experiment_expand_seeds(const WIMAdjacencyListPair& original_graph,
-                                           std::span<const CoarsenGraphBriefResult> coarsen_results,
+                                           std::span<const WIMCoarsenGraphBriefResult> coarsen_results,
                                            VertexListList seed_lists, std::span<const size_t> n_rr_sketches,
                                            vertex_id_t n_fast_expanding_levels, const ExpandingParams& raw_params,
                                            json* json_results = nullptr, json* json_time_used = nullptr)
@@ -618,12 +622,13 @@ auto do_wim_coarsening_experiment(const AdjacencyListPair<WIMEdge>& graph, const
             }));
   }
   // Step 2: Coarsening until the size threshold
-  auto coarsen_results = std::vector<CoarsenGraphBriefResult>{};
+  auto coarsen_results = std::vector<WIMCoarsenGraphBriefResult>{};
   for (auto level = 1_vid, n_coarsened = n; n_coarsened > params.coarsening_threshold; ++level) {
     auto [json_exp_cur, json_time_cur] = make_json_cur_items(level);
     // Step 2.1: Gets the coarsened graph
-    do_continue_coarsening_graph(graph, coarsen_results, level, *params.coarsening_threshold, *params.coarsening,
-                                 json_exp_cur, &(*json_time_cur)["coarsen"]);
+    RFL_RETURN_ON_ERROR(do_continue_coarsening_graph(                                    //
+        graph, coarsen_results, level, *params.coarsening_threshold, *params.coarsening, //
+        json_exp_cur, &(*json_time_cur)["coarsen"]));
     const auto& cur_coarsen_result = coarsen_results.back();
     n_coarsened = cur_coarsen_result.coarsened.n_vertices();
 
@@ -665,11 +670,35 @@ auto do_wim_contrast_experiment(const AdjacencyListPair<WIMEdge>& graph, const W
 
   auto coarsen_results = do_coarsen_graph(graph, params.coarsening_level, params.coarsening_threshold,
                                           *params.coarsening, &json_root, &json_time_used["coarsen"]);
-  auto* graph_for_algorithm = coarsen_results.empty() ? &graph : &coarsen_results.back().coarsened;
-  auto n_experiments = 0;
-  auto total_expanding_time = 0.0;
+  RFL_RETURN_ON_ERROR(coarsen_results);
+  auto* graph_for_algorithm = coarsen_results->empty() ? &graph : &coarsen_results->back().coarsened;
+
+  if (params.with_rr_sketch) {
+    auto& json_exp_cur = json_root["rr_sketching"];
+    auto& json_time_cur = json_time_used["rr_sketching"];
+    auto wim_params = WIMParams{
+        .n_sketches = params.n_sketches,
+        .n_seeds = params.n_seeds,
+        .simulation_try_count = params.simulation_try_count,
+    };
+    ELOG_INFO << "==== Starts RR-sketching algorithm ====";
+    RFL_RETURN_ON_ERROR(do_wim_experiment_get_seeds(*graph_for_algorithm, *params.common, wim_params,
+                                                    &json_exp_cur["rr_sketch"], &json_time_cur)
+                            .and_then([&](VertexListList seeds_selected) -> rfl::Result<VertexListList> {
+                              return do_coarsening_experiment_expand_seeds( //
+                                  graph, *coarsen_results, std::move(seeds_selected), params.n_sketches,
+                                  *params.n_fast_expanding_levels, *params.expanding, //
+                                  &json_exp_cur["expanding_seeds"], &json_time_cur["expand_seeds"]);
+                            })
+                            .transform([&](VertexListList expanded_seeds) {
+                              do_wim_experiment_simulate(graph, expanded_seeds, wim_params, //
+                                                         &json_exp_cur["simulation"], &json_time_cur["simulate"]);
+                              return RESULT_VOID_SUCCESS;
+                            }));
+  }
 
 #define CONTRAST_EXPERIMENT_FN [&](const WIMAdjacencyListPair& graph) -> rfl::Result<VertexList>
+
   auto contrast_experiment_framework = [&](std::string_view algorithm_name, auto&& algorithm_fn) -> ResultVoid {
     ELOGFMT(INFO, "==== Starts contrast algorithm: {} ====", algorithm_name);
     auto& json_exp_cur = json_root[algorithm_name];
@@ -684,7 +713,7 @@ auto do_wim_contrast_experiment(const AdjacencyListPair<WIMEdge>& graph, const W
           json_time_cur["algorithm"] = timer.elapsed();
 
           // Step 2: Expands seed vertices
-          return do_expand_seeds(graph, coarsen_results, seeds, *params.n_fast_expanding_levels, *params.expanding,
+          return do_expand_seeds(graph, *coarsen_results, seeds, *params.n_fast_expanding_levels, *params.expanding,
                                  &json_exp_cur["expanded_seeds"], &json_time_cur["expand"]);
         })
         .and_then([&](VertexList expanded_seeds) -> ResultVoid {
@@ -694,6 +723,7 @@ auto do_wim_contrast_experiment(const AdjacencyListPair<WIMEdge>& graph, const W
           return RESULT_VOID_SUCCESS;
         });
   };
+
   auto max_n_seeds = ranges::max(params.n_seeds);
   auto pagerank_params_common = PagerankParams{
       .damping_factor = *params.pagerank_damping_factor,
@@ -737,29 +767,6 @@ auto do_wim_contrast_experiment(const AdjacencyListPair<WIMEdge>& graph, const W
           };
           return imrank(graph.inv_adj_list, imrank_params);
         }));
-  }
-  if (params.with_rr_sketch) {
-    auto& json_exp_cur = json_root["rr_sketching"];
-    auto& json_time_cur = json_time_used["rr_sketching"];
-    auto wim_params = WIMParams{
-        .n_sketches = params.n_sketches,
-        .n_seeds = params.n_seeds,
-        .simulation_try_count = params.simulation_try_count,
-    };
-    ELOG_INFO << "==== Starts RR-sketching algorithm ====";
-    RFL_RETURN_ON_ERROR(
-        do_wim_experiment_get_seeds( //
-            *graph_for_algorithm, *params.common, wim_params, &json_exp_cur["rr_sketch"], &json_time_cur)
-            .and_then([&](VertexListList seeds_selected) -> rfl::Result<VertexListList> {
-              return do_coarsening_experiment_expand_seeds( //
-                  graph, coarsen_results, std::move(seeds_selected), params.n_sketches, *params.n_fast_expanding_levels,
-                  *params.expanding, &json_exp_cur["expanding_seeds"], &json_time_cur["expand_seeds"]);
-            })
-            .transform([&](VertexListList expanded_seeds) {
-              do_wim_experiment_simulate(graph, expanded_seeds, wim_params, //
-                                         &json_exp_cur["simulation"], &json_time_cur["simulate"]);
-              return RESULT_VOID_SUCCESS;
-            }));
   }
   // Done all
   return std::move(json_root);
