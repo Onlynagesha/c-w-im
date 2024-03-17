@@ -1,4 +1,5 @@
 #include "coarsening.h"
+#include "coarsening_dump.h"
 #include "dump.h"
 #include "utils/easylog.h"
 #include "wim.h"
@@ -639,8 +640,8 @@ auto merge_coarsened_wbim_edge_p_boost(WBIMCoarsenedEdgeDetails& dest, const WBI
   auto get_p_boost = [&](size_t i) {
     auto boosted_p_cross = dest.p_cross;
     ranges::for_each(range(N), LAMBDA_1(boosted_p_cross[_1][i] = dest.p_boost_cross[_1][i]));
-    MYLOG_FMT_TRACE("p_cross from group {} to {} when target vertex {} is assumed to be boosted:\n\t{:::.4f}", //
-                    gu.members, gv.members, gv.members[i], boosted_p_cross);
+    MYLOG_FMT_TRACE("p_cross from group {} to {} when target vertex {} is assumed to be boosted: {}", //
+                    gu.members, gv.members, gv.members[i], dump_p_cross(boosted_p_cross, N, gv.n_members(), 4));
     return get_merged_p(boosted_p_cross, gu.p_internal, heuristics, gu.n_members(), gv.n_members(), params);
   };
   dest.merged.p_boost = [&]() {

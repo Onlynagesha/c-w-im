@@ -1,4 +1,5 @@
-#include "coarsening.h"
+#include "coarsening_dump.h"
+#include "coarsening_details_types.h"
 #include "dump.h"
 #include "dump_utils.h"
 #include <fmt/ranges.h>
@@ -8,40 +9,6 @@
 namespace {
 using PInternalContainer = CoarsenedVertexDetailsBase::PInternalContainer;
 using PCrossContainer = CoarsenedEdgeDetailsBase::PCrossContainer;
-
-auto dump_p_internal(const PInternalContainer& p_internal, size_t n_members, int indent, int level) -> std::string {
-  BOOST_ASSERT(level >= 0);
-  auto m = n_members;
-  auto rows = range(m) | TRANSFORM_VIEW(fmt::format("{::.4f}", p_internal[_1] | views::take(m)));
-  if (indent <= 0) {
-    return fmt::format("{}", rows);
-  }
-  auto res = "["s;
-  for (auto i : range(m)) {
-    res += '\n' + std::string(indent * (level + 1), ' ');
-    res += rows[i];
-  }
-  res += '\n' + std::string(indent * level, ' ') + ']';
-  return res;
-}
-
-auto dump_p_cross(const PCrossContainer& p_cross, size_t n_members_left, size_t n_members_right, int indent, int level)
-    -> std::string {
-  BOOST_ASSERT(level >= 0);
-  auto n_rows = n_members_left;
-  auto n_cols = n_members_right;
-  auto rows = range(n_rows) | TRANSFORM_VIEW(fmt::format("{::.4f}", p_cross[_1] | views::take(n_cols)));
-  if (indent <= 0) {
-    return fmt::format("{}", rows);
-  }
-  auto res = "["s;
-  for (auto i : range(n_rows)) {
-    res += '\n' + std::string(indent * (level + 1), ' ');
-    res += rows[i];
-  }
-  res += '\n' + std::string(indent * level, ' ') + ']';
-  return res;
-};
 
 auto coarsened_vertex_details_base_components(const CoarsenedVertexDetailsBase& base, int indent, int level)
     -> std::forward_list<std::string> {
