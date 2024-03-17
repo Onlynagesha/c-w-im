@@ -2,9 +2,9 @@
 
 #include "graph_types.h"
 #include "utils/boost_assert.h"
-#include "utils/dynamic_bitset.h"
 #include "utils/flat_set.h"
 #include "utils/graph.h"
+#include "vertex_set.h"
 #include <rfl/Size.hpp>
 #include <rfl/Validator.hpp>
 #include <rfl/comparisons.hpp>
@@ -29,37 +29,6 @@ inline auto get_random_edge_state(const WBIMEdge& e) -> PRRSketchEdgeState {
     return PRRSketchEdgeState::BLOCKED;
   }
 }
-
-struct VertexSet {
-  std::vector<vertex_id_t> vertex_list;
-  DynamicBitset mask;
-
-  explicit VertexSet(vertex_id_t n) : vertex_list(), mask(n) {}
-
-  VertexSet(vertex_id_t n, std::span<const vertex_id_t> vertices)
-      : vertex_list(vertices.begin(), vertices.end()), mask(n) {
-    for (auto v : vertices) {
-      BOOST_ASSERT_MSG(v >= 0 && v < n, "Vertex index out of range [0, n)");
-      mask.set(v);
-    }
-  }
-
-  VertexSet(vertex_id_t n, std::initializer_list<vertex_id_t> vertices)
-      : VertexSet(n, std::span{vertices.begin(), vertices.end()}) {}
-
-  auto num_vertices_in_whole_graph() const -> vertex_id_t {
-    return static_cast<vertex_id_t>(mask.size());
-  }
-
-  auto size() const -> vertex_id_t {
-    return static_cast<vertex_id_t>(vertex_list.size());
-  }
-
-  auto contains(vertex_id_t v) const -> bool {
-    BOOST_ASSERT_MSG(v >= 0 && v < num_vertices_in_whole_graph(), "Vertex index out of range [0, n)");
-    return mask.test(v);
-  }
-};
 
 struct RRSketchSet {
   const InvAdjacencyList<WIMEdge>* inv_graph;
@@ -285,40 +254,25 @@ inline auto simulate_p(const AdjacencyList<E>& graph, SeedsOrList&& seeds_or_lis
   }
 }
 
-struct DetectProbabilityFromSeedsResult {
+struct WBIMActivationProbability {
   std::vector<edge_probability_t> p_in;
   std::vector<edge_probability_t> p_in_boosted;
 
-  DetectProbabilityFromSeedsResult() = default;
-  explicit DetectProbabilityFromSeedsResult(vertex_id_t n) : p_in(n, 0.0_ep), p_in_boosted(n, 0.0_ep) {}
+  WBIMActivationProbability() = default;
+  explicit WBIMActivationProbability(vertex_id_t n) : p_in(n, 0.0_ep), p_in_boosted(n, 0.0_ep) {}
 
-  auto swap(DetectProbabilityFromSeedsResult& rhs) -> void {
+  auto swap(WBIMActivationProbability& rhs) -> void {
     p_in.swap(rhs.p_in);
     p_in_boosted.swap(rhs.p_in_boosted);
   }
 
-  auto equals_with(const DetectProbabilityFromSeedsResult& rhs) const -> bool {
+  auto equals_with(const WBIMActivationProbability& rhs) const -> bool {
     return ranges::equal(p_in, rhs.p_in) && ranges::equal(p_in_boosted, rhs.p_in_boosted);
   }
 };
 
-auto wim_detect_probability_from_seeds(const InvAdjacencyList<WIMEdge>& inv_graph, const VertexSet& seeds,
-                                       vertex_id_t max_distance) -> rfl::Result<DetectProbabilityFromSeedsResult>;
-
-auto wbim_detect_probability_from_seeds(const InvAdjacencyList<WBIMEdge>& inv_graph, const VertexSet& seeds,
-                                        vertex_id_t max_distance) -> rfl::Result<DetectProbabilityFromSeedsResult>;
-
-template <is_edge_property E>
-auto detect_probability_from_seeds(const InvAdjacencyList<E>& inv_graph, const VertexSet& seeds,
-                                   vertex_id_t max_distance) -> rfl::Result<DetectProbabilityFromSeedsResult> {
-  if constexpr (std::is_same_v<E, WIMEdge>) {
-    return wim_detect_probability_from_seeds(inv_graph, seeds, max_distance);
-  } else if constexpr (std::is_same_v<E, WBIMEdge>) {
-    return wbim_detect_probability_from_seeds(inv_graph, seeds, max_distance);
-  } else {
-    static_assert(rfl::always_false_v<E>, "Invalid edge type.");
-  }
-}
+auto wbim_activation_probability_from_seeds(const InvAdjacencyList<WBIMEdge>& inv_graph, const VertexSet& seeds,
+                                            vertex_id_t max_distance) -> rfl::Result<WBIMActivationProbability>;
 
 WIM_DUMP_TYPES(DECLARE_FREE_DUMP_FUNCTION_FOR_WIM_TYPES)
 

@@ -16,20 +16,21 @@
   F(WIMCoarseningExperimentParams) /* experiments.h */  \
   F(WIMContrastExperimentParams)   /* experiments.h */
 
-#define REGISTER_DUMP_FUNCTIONS_WITH_JSON(Type)                         \
+#define REGISTER_AUTO_GENERATED_DUMP_FUNCTIONS_WITH_JSON(Type)          \
   auto dump(const Type& value, int indent = 0) noexcept -> std::string; \
   auto dump_as_json(const Type& value) noexcept -> json;
 
-DUMP_REGISTERED_TYPES_AUTO_GENERATED(REGISTER_DUMP_FUNCTIONS_WITH_JSON)
+DUMP_REGISTERED_TYPES_AUTO_GENERATED(REGISTER_AUTO_GENERATED_DUMP_FUNCTIONS_WITH_JSON)
+#undef REGISTER_AUTO_GENERATED_DUMP_FUNCTIONS_WITH_JSON
 
 template <class T>
-concept has_dump_free_methods = requires(T t) {
-  { dump(t) } -> std::same_as<std::string>;    // dump(T value)
-  { dump(t, 4) } -> std::same_as<std::string>; // dump(T value, int indent)
+concept has_dump_free_methods = requires(const T& t) {
+  { dump(t) } -> std::same_as<std::string>;
+  { dump(t, 4) } -> std::same_as<std::string>;
 };
 
 template <class T>
-concept has_dump_member_methods = requires(T t) {
+concept has_dump_member_methods = requires(const T& t) {
   { t.dump() } -> std::same_as<std::string>;
   { t.dump(4) } -> std::same_as<std::string>;
 };

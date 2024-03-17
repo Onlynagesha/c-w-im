@@ -3,13 +3,53 @@
 #include "utils/easylog.h"
 #include "wim.h"
 #include <fmt/ranges.h>
+#include <magic_enum.hpp>
 #include <nwgraph/adaptors/edge_range.hpp>
 
 namespace {
-constexpr auto MAX_N_MEMBERS = WIMCoarsenedVertexDetails::MAX_N_MEMBERS;
+constexpr auto MAX_N_MEMBERS = CoarsenedVertexDetailsBase::MAX_N_MEMBERS;
 constexpr auto P_NOT_ASSIGNED = -1.0_ep;
 
 using VertexPair = std::pair<vertex_id_t, vertex_id_t>;
+using HeuristicsContainer = CoarsenedVertexDetailsBase::HeuristicsContainer;
+using PCrossContainer = CoarsenedEdgeDetailsBase::PCrossContainer;
+using PInternalContainer = CoarsenedVertexDetailsBase::PInternalContainer;
+
+struct StepTimer {
+  std::string task_name;
+  nw::util::seconds_timer timer;
+  int step_count = 0;
+  double total_time_used;
+
+  explicit StepTimer(std::string task_name)
+      : task_name(std::move(task_name)), timer(), step_count(0), total_time_used(0.0) {}
+
+  template <class Func, class... Args>
+    requires(std::is_invocable_v<Func, Args...>)
+  auto do_step(std::string_view step_description, Func&& func, Args&&... args) {
+    constexpr auto RETURNS_VOID = std::is_void_v<std::invoke_result_t<Func, Args...>>;
+
+    timer.start();
+    auto invoke_result = [&]() {
+      if constexpr (RETURNS_VOID) {
+        std::invoke(func, std::forward<Args>(args)...);
+        return rfl::Nothing{};
+      } else {
+        return std::invoke(func, std::forward<Args>(args)...);
+      }
+    }();
+    timer.stop();
+
+    step_count += 1;
+    total_time_used += timer.elapsed();
+    constexpr auto msg_pattern = "Done step {} of task '{}': {}."
+                                 "\n\tTime usage: {:.3f} in current step, {:.3f} in total.";
+    ELOGFMT(INFO, msg_pattern, step_count, task_name, step_description, timer.elapsed(), total_time_used);
+    if constexpr (!RETURNS_VOID) {
+      return invoke_result;
+    }
+  }
+};
 
 auto merge_p(edge_probability_t e1, edge_probability_t e2, NeighborMatchRule rule) -> edge_probability_t {
   switch (rule) {
@@ -162,70 +202,84 @@ auto merge_edge_to_undirected_generic(AdjacencyList<E>& graph, const CoarseningP
   return AdjacencyList<edge_probability_t>{edge_list};
 }
 
-// vertex_weights can be either a random-access container or something dummy like views::repeat
-template <auto WhichP,                   // E::*WhichP -> edge_probability_t
-          is_edge_property E, int IsInv, // IsInv == 1 is transposed graph; IsInv == 0 otherwise
-          random_access_range_of<vertex_weight_t> VertexWeights>
-  requires(member_object_pointer_from_to<decltype(WhichP), E, edge_probability_t> && (IsInv == 0 || IsInv == 1))
+template <auto WhichP, is_edge_property E, int IsInv,
+          same_as_either<std::nullptr_t, VertexSet> SkipSet = std::nullptr_t>
+  requires(member_object_pointer_from_to<decltype(WhichP), E, edge_probability_t>)
 auto get_heuristic_generic(const graph::adjacency<IsInv, E>& graph, std::span<const vertex_id_t> group_id,
-                           VertexWeights&& vertex_weights, vertex_id_t v, InOutHeuristicRule rule)
-    -> edge_probability_t {
+                           std::span<const vertex_weight_t> vertex_weights, vertex_id_t v, InOutHeuristicRule rule,
+                           const SkipSet& skip_set = nullptr) -> edge_probability_t {
   auto res = 0.0_ep;
   for (auto [u, w] : graph[v]) {
     if (group_id[u] == group_id[v]) {
       continue;
+    }
+    if constexpr (std::is_same_v<SkipSet, VertexSet>) {
+      if (skip_set.contains(u)) {
+        continue; // Customized skipping rule
+      }
     }
     if (rule == InOutHeuristicRule::P) {
       res += w.*WhichP;
     } else if (rule == InOutHeuristicRule::W) {
       res += w.*WhichP * vertex_weights[u];
     } else {
+      BOOST_ASSERT(rule == InOutHeuristicRule::COUNT || rule == InOutHeuristicRule::UNIT);
       res += 1.0_ep; // Counts only
     }
   }
   return res;
 }
 
-template <is_edge_property E, random_access_range_of<vertex_weight_t> VertexWeights>
-auto get_heuristic_in(const InvAdjacencyList<E>& inv_graph, std::span<const vertex_id_t> group_id,
-                      VertexWeights&& vertex_weights, vertex_id_t v, InOutHeuristicRule rule) -> edge_probability_t {
-  return get_heuristic_generic<&E::p>(inv_graph, group_id, std::forward<VertexWeights>(vertex_weights), v, rule);
-}
+#define DEFINE_GET_HEURISTIC_FUNCTION(suffix, IsInv, p_member)                                                 \
+  template <is_edge_property E>                                                                                \
+  auto get_heuristics_##suffix(const graph::adjacency<IsInv, E>& graph, std::span<const vertex_id_t> group_id, \
+                               std::span<const vertex_weight_t> vertex_weights, vertex_id_t v,                 \
+                               InOutHeuristicRule rule) -> edge_probability_t {                                \
+    return get_heuristic_generic<&E::p_member>(graph, group_id, vertex_weights, v, rule);                      \
+  }                                                                                                            \
+  template <is_edge_property E>                                                                                \
+  auto get_heuristics_##suffix(const graph::adjacency<IsInv, E>& graph, std::span<const vertex_id_t> group_id, \
+                               std::span<const vertex_weight_t> vertex_weights, const VertexSet& skip_set,     \
+                               vertex_id_t v, InOutHeuristicRule rule) -> edge_probability_t {                 \
+    return get_heuristic_generic<&E::p_member>(graph, group_id, vertex_weights, v, rule, skip_set);            \
+  }
 
-template <is_edge_property E, random_access_range_of<vertex_weight_t> VertexWeights>
-auto get_heuristic_out(const AdjacencyList<E>& graph, std::span<const vertex_id_t> group_id,
-                       VertexWeights&& vertex_weights, vertex_id_t v, InOutHeuristicRule rule) -> edge_probability_t {
-  return get_heuristic_generic<&E::p>(graph, group_id, std::forward<VertexWeights>(vertex_weights), v, rule);
-}
+DEFINE_GET_HEURISTIC_FUNCTION(in, 1, p)
+DEFINE_GET_HEURISTIC_FUNCTION(in_boost, 1, p_boost)
+DEFINE_GET_HEURISTIC_FUNCTION(out, 0, p)
+DEFINE_GET_HEURISTIC_FUNCTION(out_seed, 0, p_seed)
 
-template <is_edge_property E, random_access_range_of<vertex_weight_t> VertexWeights>
-auto get_heuristic_out_seed(const AdjacencyList<E>& graph, std::span<const vertex_id_t> group_id,
-                            VertexWeights&& vertex_weights, vertex_id_t v, InOutHeuristicRule rule)
-    -> edge_probability_t {
-  return get_heuristic_generic<&E::p_seed>(graph, group_id, std::forward<VertexWeights>(vertex_weights), v, rule);
-}
+#undef DEFINE_GET_HEURISTIC_FUNCTION
 
-struct GetHeuristicPResult {
-  WIMCoarsenedVertexDetails::HeuristicsContainer p;
+struct NormalizedHeuristics {
+  enum PolicyWhenAllZero { KEEPS_WHEN_ALL_ZERO, TO_UNIFORM_WHEN_ALL_ZERO };
+
+  HeuristicsContainer p;
   bool is_all_zero;
 
-  auto normalize(InOutHeuristicRule rule) -> void {
+  NormalizedHeuristics(HeuristicsContainer p_raw, InOutHeuristicRule rule, PolicyWhenAllZero policy)
+      : p(std::move(p_raw)) {
     constexpr auto EPS = 1.0e-8_ep;
+    BOOST_ASSERT_MSG(p.size() > 0, "Empty group disallowed.");
     // Ensures that each value falls in range [0, +inf) in case of floating point error
-    for (auto& h_item : p) {
-      BOOST_ASSERT(!std::isinf(h_item) && !std::isnan(h_item));
-      h_item = std::max(h_item, 0.0_ep);
+    for (auto& h : p) {
+      BOOST_ASSERT(!std::isinf(h) && !std::isnan(h));
+      h = std::max(h, 0.0_ep);
     }
     // For UNIT rule, normalizes to {0, 1} first.
     if (rule == InOutHeuristicRule::UNIT) {
-      for (auto& h_item : p) {
-        h_item = (h_item < EPS) ? 0.0_ep : 1.0_ep;
-      }
+      ranges::for_each(p, LAMBDA_1(_1 = (_1 < EPS) ? 0.0_ep : 1.0_ep));
     }
     // Normalizes by sum such that accumulate_sum(p_in) == 1.0
     auto sum = accumulate_sum(p);
     if (sum <= 0.0) {
-      is_all_zero = true;
+      if (policy == KEEPS_WHEN_ALL_ZERO) {
+        is_all_zero = true;
+      } else {
+        BOOST_ASSERT(policy == TO_UNIFORM_WHEN_ALL_ZERO);
+        ranges::fill(p, 1.0_ep / p.size()); // Sets all the heuristic values to 1 / M
+        is_all_zero = false;
+      }
     } else {
       ranges::for_each(p, LAMBDA_1(_1 /= sum));
       is_all_zero = false;
@@ -233,85 +287,123 @@ struct GetHeuristicPResult {
   }
 };
 
-auto get_normalized_heuristic_p_in(const WIMCoarsenedVertexDetails& gu, InOutHeuristicRule rule)
-    -> GetHeuristicPResult {
-  auto res = GetHeuristicPResult{.p = gu.heuristics_in, .is_all_zero = false};
-  res.normalize(rule);
-  return res;
-}
+#define DEFINE_GET_NORMALIZED_HEURISTIC_FUNCTION(suffix, heuristic_member)                                         \
+  template <is_coarsened_vertex_details DetailsType>                                                               \
+    requires(requires(DetailsType x) {                                                                             \
+      { x.heuristic_member } -> std::same_as<HeuristicsContainer&>;                                                \
+    }) /* Using C++20 constraint to check member presence */                                                       \
+  auto get_normalized_heuristic_##suffix(const DetailsType& gu, InOutHeuristicRule rule,                           \
+                                         NormalizedHeuristics::PolicyWhenAllZero policy) -> NormalizedHeuristics { \
+    return NormalizedHeuristics(gu.heuristic_member, rule, policy);                                                \
+  }
 
-auto get_normalized_heuristic_p_out(const WIMCoarsenedVertexDetails& gu, InOutHeuristicRule rule)
-    -> GetHeuristicPResult {
-  auto res = GetHeuristicPResult{.p = gu.heuristics_out, .is_all_zero = false};
-  res.normalize(rule);
-  return res;
-}
+DEFINE_GET_NORMALIZED_HEURISTIC_FUNCTION(p_in, heuristics_in)
+DEFINE_GET_NORMALIZED_HEURISTIC_FUNCTION(p_in_boost, heuristics_in_boost)
+DEFINE_GET_NORMALIZED_HEURISTIC_FUNCTION(p_out, heuristics_out)
+DEFINE_GET_NORMALIZED_HEURISTIC_FUNCTION(p_out_seed, heuristics_out_seed)
 
-auto get_normalized_heuristic_p_out_seed(const WIMCoarsenedVertexDetails& gu, InOutHeuristicRule rule)
-    -> GetHeuristicPResult {
-  auto res = GetHeuristicPResult{.p = gu.heuristics_out_seed, .is_all_zero = false};
-  res.normalize(rule);
-  return res;
-}
+#undef DEFINE_GET_NORMALIZED_HEURISTIC_FUNCTION
 
-auto get_normalized_heuristic_p_in(const WIMCoarsenedEdgeDetails& edge, const WIMCoarsenedEdgeDetails* inv_edge,
-                                   const WIMCoarsenedVertexDetails& gu, const WIMCoarsenedVertexDetails& gv,
-                                   InOutHeuristicRule rule) -> GetHeuristicPResult {
+template <is_coarsened_edge_details EdgeDetailsType, is_coarsened_vertex_details VertexDetailsType>
+auto get_normalized_heuristic_p_in(const EdgeDetailsType& edge, const EdgeDetailsType* inv_edge,
+                                   const VertexDetailsType& gu, const VertexDetailsType& gv, InOutHeuristicRule rule,
+                                   NormalizedHeuristics::PolicyWhenAllZero policy) -> NormalizedHeuristics {
   constexpr auto EPS = 1.0e-8_ep;
-  auto res = GetHeuristicPResult{.p = gu.heuristics_in, .is_all_zero = false};
+  auto p_temp = gu.heuristics_in;
   if (inv_edge != nullptr) {
     // Removes the directed edge gu.members[j] <-- gv.members[i]
     for (auto [j, i] : views::cartesian_product(gu.member_indices(), gv.member_indices())) {
       if (rule == InOutHeuristicRule::P) {
-        res.p[j] -= inv_edge->p_cross[i][j];
+        p_temp[j] -= inv_edge->p_cross[i][j];
       } else if (rule == InOutHeuristicRule::W) {
-        res.p[j] -= inv_edge->p_cross[i][j] * gv.vertex_weights[i];
+        p_temp[j] -= inv_edge->p_cross[i][j] * gv.vertex_weights[i];
       } else {
         BOOST_ASSERT(rule == InOutHeuristicRule::UNIT || rule == InOutHeuristicRule::COUNT);
-        res.p[j] -= (inv_edge->p_cross[i][j] < EPS) ? 0.0_ep : 1.0_ep;
+        p_temp[j] -= (inv_edge->p_cross[i][j] < EPS) ? 0.0_ep : 1.0_ep;
       }
     }
-    MYLOG_FMT_TRACE("In-heuristics of group {} after removing back edges from {} = {}", //
-                    gu.members, gv.members, res.p);
+    constexpr auto msg_pattern = "In-heuristics of group {} after removing back edges from {} = {::.4f}";
+    MYLOG_FMT_TRACE(msg_pattern, gu.members, gv.members, p_temp);
   }
-  res.normalize(rule);
-  return res;
+  return NormalizedHeuristics(p_temp, rule, policy);
+}
+
+// The probability of spread success from Gu.members[j0] to Gv.members[i]
+auto get_merged_p_simple_to_with_first(const PCrossContainer& edge_p_cross, const PCrossContainer& edge_p_cross_first,
+                                       const PInternalContainer& gU_p_internal,
+                                       const PInternalContainer& gU_p_internal_first, //
+                                       size_t gU_n_members, size_t j0, size_t i) -> edge_probability_t {
+  if (gU_n_members == 1) {
+    return edge_p_cross_first[j0][i];
+  } else if (gU_n_members == 2) {
+    auto j1 = get_next_j<2>(j0);
+    return at_least_1_probability(                        //
+        edge_p_cross_first[j0][i],                        // j0 -> i
+        gU_p_internal_first[j0][j1] * edge_p_cross[j1][i] // j0 -> j1 -> i
+    );
+  }
+  BOOST_ASSERT_MSG(gU_n_members == 3, "Group size other than 1, 2, 3 is not supported.");
+  auto [j1, j2] = get_next_j<3>(j0);
+  return at_least_1_probability(                                                 //
+      edge_p_cross_first[j0][i],                                                 // j0 -> i
+      gU_p_internal_first[j0][j1] * edge_p_cross[j1][i],                         // j0 -> j1 -> i
+      gU_p_internal_first[j0][j2] * edge_p_cross[j2][i],                         // j0 -> j2 -> i
+      gU_p_internal_first[j0][j1] * gU_p_internal[j1][j2] * edge_p_cross[j2][i], // j0 -> j1 -> j2 -> i
+      gU_p_internal_first[j0][j2] * gU_p_internal[j2][j1] * edge_p_cross[j1][i]  // j0 -> j2 -> j1 -> i
+  );
+}
+
+auto get_merged_p_simple_to(const PCrossContainer& edge_p_cross, const PInternalContainer& gU_p_internal,
+                            size_t gU_n_members, size_t j0, size_t i) -> edge_probability_t {
+  return get_merged_p_simple_to_with_first( //
+      edge_p_cross, edge_p_cross, gU_p_internal, gU_p_internal, gU_n_members, j0, i);
 }
 
 // The probability of spread success from gu.members[j0] to any member of gv
+auto get_merged_p_simple_with_first(const PCrossContainer& edge_p_cross, const PCrossContainer& edge_p_cross_first,
+                                    const PInternalContainer& gU_p_internal,
+                                    const PInternalContainer& gU_p_internal_first, size_t gU_n_members,
+                                    size_t gV_n_members, size_t j0) -> edge_probability_t {
+  auto to_p_to_target = TRANSFORM_VIEW(get_merged_p_simple_to_with_first( //
+      edge_p_cross, edge_p_cross_first, gU_p_internal, gU_p_internal_first, gU_n_members, j0, _1));
+  return at_least_1_probability_r(range(gV_n_members) | to_p_to_target);
+}
+
+// The probability of spread success from gu.members[j0] to any member of gv
+auto get_merged_p_simple(const PCrossContainer& edge_p_cross, const PInternalContainer& gU_p_internal,
+                         size_t gU_n_members, size_t gV_n_members, size_t j0) -> edge_probability_t {
+  auto to_p_to_target = TRANSFORM_VIEW(get_merged_p_simple_to(edge_p_cross, gU_p_internal, gU_n_members, j0, _1));
+  return at_least_1_probability_r(range(gV_n_members) | to_p_to_target);
+}
+
+// The probability of spread success from gu.members[j0] to any member of gv
+template <is_coarsened_edge_details EdgeDetailsType, is_coarsened_vertex_details VertexDetailsType>
+auto get_merged_p_simple(const EdgeDetailsType& edge, const VertexDetailsType& gu, const VertexDetailsType& gv,
+                         size_t j0) -> edge_probability_t {
+  return get_merged_p_simple(edge.p_cross, gu.p_internal, gu.n_members(), gv.n_members(), j0);
+}
+
+// The probability of spread success from gu.members[j0] to ANY member of gv
 // is_seed: Whether the source vertex gu.members[j0] is a seed.
-auto get_merged_p_simple(const WIMCoarsenedEdgeDetails& edge, const WIMCoarsenedVertexDetails& gu,
-                         const WIMCoarsenedVertexDetails& gv, size_t j0, bool is_seed) -> edge_probability_t {
+auto get_wim_merged_p_simple(const WIMCoarsenedEdgeDetails& edge, const WIMCoarsenedVertexDetails& gu,
+                             const WIMCoarsenedVertexDetails& gv, size_t j0, bool is_seed) -> edge_probability_t {
   auto [p_cross_first, p_internal_first] =
       is_seed ? std::tie(edge.p_seed_cross, gu.p_seed_internal) : std::tie(edge.p_cross, gu.p_internal);
-  auto N = gu.n_members();
+  return get_merged_p_simple_with_first( //
+      edge.p_cross, p_cross_first, gu.p_internal, p_internal_first, gu.n_members(), gv.n_members(), j0);
+}
 
-  if (N == 2) {
-    // 2 : For each destination index i, at most 2 routes (see below)
-    constexpr auto MAX_N_PATHS = 2 * MAX_N_MEMBERS;
-    auto paths = StaticVector<edge_probability_t, MAX_N_PATHS>{};
-    auto j1 = get_next_j<2>(j0);
-    for (auto i : gv.member_indices()) {
-      paths.push_back(p_cross_first[j0][i]);                           // (1) j0 -> i
-      paths.push_back(p_internal_first[j0][j1] * edge.p_cross[j1][i]); // (2) j0 -> j1 -> i
-    }
-    return at_least_1_probability_r(paths);
-  } else {
-    BOOST_ASSERT_MSG(N == 3, "Group size large than 3 is not supported.");
-    // 5 : For each destination index i, at most 5 routes (see below)
-    constexpr auto MAX_N_PATHS = 5 * MAX_N_MEMBERS;
-    auto paths = StaticVector<edge_probability_t, MAX_N_PATHS>{};
-    auto [j1, j2] = get_next_j<3>(j0);
-    for (auto i : gv.member_indices()) {
-      paths.push_back(p_cross_first[j0][i]);                           // (1) j0 -> i
-      paths.push_back(p_internal_first[j0][j1] * edge.p_cross[j1][i]); // (2) j0 -> j1 -> i
-      paths.push_back(p_internal_first[j0][j2] * edge.p_cross[j2][i]); // (3) j0 -> j2 -> i
-      // (4,5) j0 -> j1|j2 -> j2|j1 -> i
-      paths.push_back(p_internal_first[j0][j1] * gu.p_internal[j1][j2] * edge.p_cross[j2][i]);
-      paths.push_back(p_internal_first[j0][j2] * gu.p_internal[j2][j1] * edge.p_cross[j1][i]);
-    }
-    return at_least_1_probability_r(paths);
-  }
+// The probability of spread success from gu.members[j0] to ANY member of gv
+// i_boosted: Which member in Gv is assumed to be boosted.
+auto get_wbim_merged_p_simple(const WBIMCoarsenedEdgeDetails& edge, const WBIMCoarsenedVertexDetails& gu,
+                              const WBIMCoarsenedVertexDetails& gv, size_t j0, size_t i_boosted = -1)
+    -> edge_probability_t {
+  // We only care about p_cross[*][i] or p_boost_cross[*][i]
+  auto to_p_to_target = views::transform([&](size_t i) {
+    const auto* p_cross_used = (i == i_boosted) ? &edge.p_boost_cross : &edge.p_cross;
+    return get_merged_p_simple_to(*p_cross_used, gu.p_internal, gu.n_members(), j0, i);
+  });
+  return at_least_1_probability_r(gv.member_indices() | to_p_to_target); // To ANY member of Gv
 }
 
 // F[2^N][2^N]
@@ -323,13 +415,19 @@ auto make_initial_precise_state_container() -> PreciseStateContainer {
   return res;
 }
 
+struct GetMergedPContext {
+  const PCrossContainer* edge_p_cross;
+  const PInternalContainer* gU_p_internal;
+  size_t gU_n_members;
+  size_t gV_n_members;
+};
+
 // T = Subset of gu.members that have received message in all the previous turns
 // S = Subset of gu.members that receives message in the last turn.
 // Both T, S are encoded as bitset. S is always a non-empty subset of T.
-auto get_merged_p_precise_impl(const WIMCoarsenedEdgeDetails& edge, const WIMCoarsenedVertexDetails& gu,
-                               const WIMCoarsenedVertexDetails& gv, PreciseStateContainer& F, size_t T, size_t S)
-    -> edge_probability_t {
-  auto N = gu.n_members();
+auto get_merged_p_precise_impl(const GetMergedPContext* ctx, //
+                               PreciseStateContainer& F, size_t T, size_t S) -> edge_probability_t {
+  auto N = ctx->gU_n_members;
   auto U = (1zu << N) - 1; // U = Universal set
   BOOST_ASSERT_MSG(S <= U && T <= U, "S, T must be in the range [0, 2^N).");
   // Dynamic programming implemented as memorized searching
@@ -340,8 +438,8 @@ auto get_merged_p_precise_impl(const WIMCoarsenedEdgeDetails& edge, const WIMCoa
   auto paths = StaticVector<edge_probability_t, MAX_N_PATHS>{};
   // Extracts all the direct paths in S -> Gv
   for (auto j : indices_in_bitset(N, S)) {
-    for (auto i : gv.member_indices()) {
-      paths.push_back(edge.p_cross[j][i]);
+    for (auto i : range(ctx->gV_n_members)) {
+      paths.push_back((*ctx->edge_p_cross)[j][i]);
     }
   }
   auto p_success_in_this_turn = at_least_1_probability_r(paths);
@@ -352,7 +450,7 @@ auto get_merged_p_precise_impl(const WIMCoarsenedEdgeDetails& edge, const WIMCoa
   auto sum = 0.0_ep;
   auto to_p_internal = views::transform([&](auto j_pair) {
     auto [j0, j1] = j_pair;
-    return gu.p_internal[j0][j1];
+    return (*ctx->gU_p_internal)[j0][j1];
   });
   // Traverses all the non-empty subset of U - T
   for (auto S_next = U ^ T; S_next != 0; S_next = (S_next - 1) & (U ^ T)) {
@@ -361,13 +459,13 @@ auto get_merged_p_precise_impl(const WIMCoarsenedEdgeDetails& edge, const WIMCoa
     auto p_S_to_S_next = 1.0_ep;
     for (auto dest : indices_in_bitset(N, S_next)) {
       p_S_to_S_next *= at_least_1_probability_r( //
-          indices_in_bitset(N, S) | TRANSFORM_VIEW(gu.p_internal[_1][dest]));
+          indices_in_bitset(N, S) | TRANSFORM_VIEW((*ctx->gU_p_internal)[_1][dest]));
     }
     // Each direct path in S -> others must fail
     auto p_S_to_others = at_least_1_probability_r(
         views::cartesian_product(indices_in_bitset(N, S), indices_in_bitset(N, others)) | to_p_internal);
     // Message propagates to S_next in the next turn
-    auto p_next = get_merged_p_precise_impl(edge, gu, gv, F, T | S_next, S_next);
+    auto p_next = get_merged_p_precise_impl(ctx, F, T | S_next, S_next);
     constexpr auto msg_pattern = "T = {1:#0{0}b}, S = {2:#0{0}b}, S_next = {3:#0{0}b}, others = {4:#0{0}b}, "
                                  "p_S_to_S_next = {5:.4f}, p_S_to_others = {6:.4f}, p_next = {7:.4f}";
     // 2 : Extra width of the prefix "0b"
@@ -379,200 +477,340 @@ auto get_merged_p_precise_impl(const WIMCoarsenedEdgeDetails& edge, const WIMCoa
   return F[T][S] = p_success_in_this_turn + (1.0_ep - p_success_in_this_turn) * sum;
 }
 
-auto get_merged_p_precise(const WIMCoarsenedEdgeDetails& edge, const WIMCoarsenedVertexDetails& gu,
-                          const WIMCoarsenedVertexDetails& gv, size_t j_bitset) -> edge_probability_t {
-  auto F = make_initial_precise_state_container();
-  return get_merged_p_precise_impl(edge, gu, gv, F, j_bitset, j_bitset);
-}
-
-auto get_merged_p_precise(const WIMCoarsenedEdgeDetails& edge, const WIMCoarsenedVertexDetails& gu,
-                          const WIMCoarsenedVertexDetails& gv, PreciseStateContainer& F, size_t j_bitset)
+auto get_merged_p_precise(const GetMergedPContext& ctx, PreciseStateContainer* F, size_t T, size_t S)
     -> edge_probability_t {
-  return get_merged_p_precise_impl(edge, gu, gv, F, j_bitset, j_bitset);
+  if (F == nullptr) {
+    auto F_temp = make_initial_precise_state_container();
+    return get_merged_p_precise_impl(&ctx, F_temp, T, S);
+  }
+  return get_merged_p_precise_impl(&ctx, *F, T, S);
 }
 
-auto merge_coarsened_wim_graph_edge(WIMCoarsenedEdgeDetails& dest, const WIMCoarsenedEdgeDetails* inv_dest,
-                                    const WIMCoarsenedVertexDetails& gu, const WIMCoarsenedVertexDetails& gv,
-                                    const CoarseningParams& params) -> void {
-  auto N = gu.n_members();
+auto get_merged_p_precise(const GetMergedPContext& ctx, PreciseStateContainer* F, size_t S) -> edge_probability_t {
+  return get_merged_p_precise(ctx, F, S, S);
+}
+
+auto get_merged_p(const PCrossContainer& edge_p_cross, const PInternalContainer& gU_p_internal,
+                  const NormalizedHeuristics& heuristics_in, size_t gU_n_members, size_t gV_n_members,
+                  const CoarseningParams& params) -> edge_probability_t {
+  auto N = gU_n_members;
+  const auto& [p_in, p_in_all_zero] = heuristics_in;
+
+  // If no in-edge to u other than those from Gv, then there's no non-seed path from Gu to Gv
+  if (p_in_all_zero) {
+    return 0.0_ep;
+  }
   // Special case: Gu has only 1 member {u}
   if (N == 1) {
-    auto Mv = gv.n_members();
-    auto p_in_is_zero = get_normalized_heuristic_p_in(dest, inv_dest, gu, gv, params.in_out_heuristic_rule).is_all_zero;
-    // If no in-edge to u, or all the in-edges of u are from Gv,
-    // then there's no coarsened non-seed path accessible from Gu to Gv
-    dest.merged.p = p_in_is_zero ? 0.0_ep : at_least_1_probability_r(dest.p_cross[0] | views::take(Mv));
-    // However, the seed path is always enabled, whether or not there's in-edge to u.
-    dest.merged.p_seed = at_least_1_probability_r(dest.p_seed_cross[0] | views::take(Mv));
-    return;
+    return at_least_1_probability_r(edge_p_cross[0] | views::take(gV_n_members));
   }
   BOOST_ASSERT_MSG(N == 2 || N == 3, "Group size other than 1, 2, 3 is not supported.");
-  // Part (1): merged.p
-  auto [p_in, p_in_all_zero] = get_normalized_heuristic_p_in(dest, inv_dest, gu, gv, params.in_out_heuristic_rule);
-  MYLOG_FMT_TRACE("normalized in-heuristic of group {} = {::.4f}", gu.members, p_in);
-  if (p_in_all_zero) {
-    // Cannot serve as non-seed coarsened vertex since the group is isolated
-    // (with no in-edge from other coarsened vertices)
-    dest.merged.p = 0.0;
-  } else if (params.edge_weight_rule != EdgeWeightRule::MERGED_PRECISE) {
-    // SEPARATE_SIMPLE, MERGED_SIMPLE; SEPARATE_PRECISE: Calculates p_access(u) separately for each u in Gu
-    // where p_access(u) = The (estimated) probability that message propagates from u to at least 1 vertex in Gv
-    auto p_paths = StaticVector<edge_probability_t, MAX_N_MEMBERS>(N);
-    if (params.edge_weight_rule == EdgeWeightRule::SEPARATE_PRECISE) {
-      auto F = make_initial_precise_state_container();
-      for (auto j0 : range(N)) {
-        p_paths[j0] = get_merged_p_precise(dest, gu, gv, F, make_bitset_from_indices({j0}));
+
+  auto precise_ctx = GetMergedPContext{
+      .edge_p_cross = &edge_p_cross,
+      .gU_p_internal = &gU_p_internal,
+      .gU_n_members = gU_n_members,
+      .gV_n_members = gV_n_members,
+  };
+  // SEPARATE_SIMPLE, MERGED_SIMPLE, SEPARATE_PRECISE
+  if (params.edge_weight_rule != EdgeWeightRule::MERGED_PRECISE) {
+    // p_paths[j0] = Probability from Gu to Gv.members[j0]
+    auto p_paths = [&]() -> StaticVector<edge_probability_t, MAX_N_MEMBERS> {
+      if (params.edge_weight_rule == EdgeWeightRule::SEPARATE_PRECISE) {
+        auto F = make_initial_precise_state_container();
+        auto view = range(N) | TRANSFORM_VIEW(get_merged_p_precise(precise_ctx, &F, make_bitset_from_indices({_1})));
+        return {view.begin(), view.end()};
+      } else {
+        auto to_merged_p = LAMBDA_1(get_merged_p_simple(edge_p_cross, gU_p_internal, gU_n_members, gV_n_members, _1));
+        auto view = range(N) | views::transform(to_merged_p);
+        return {view.begin(), view.end()};
       }
-    } else {
-      for (auto j0 : range(N)) {
-        p_paths[j0] = get_merged_p_simple(dest, gu, gv, j0, false);
-      }
-    }
-    MYLOG_FMT_TRACE("p_paths from group {} to group {} = {::.4f}", gu.members, gv.members, p_paths);
+    }();
 
     auto to_combined = TRANSFORM_VIEW(p_in[_1] * p_paths[_1]);
     if (params.edge_weight_rule == EdgeWeightRule::MERGED_SIMPLE) {
-      // Conditional probability, where VS is a virtual source
-      // with out-edge VS -> gu.members[i] with p = p_in[i] for each i = 0 ... gu.n_members() - 1
-      dest.merged.p = at_least_1_probability_r(range(N) | to_combined) // P(VS -> gu.members -> gv.members)
-                      / at_least_1_probability_r(p_in);                // P(VS -> gu.members)
+      // Conditional probability with virtual source: P(VS -> Gu -> Gv) / P(VS -> Gu)
+      return at_least_1_probability_r(range(N) | to_combined) / at_least_1_probability_r(p_in);
     } else {
-      BOOST_ASSERT(params.edge_weight_rule == EdgeWeightRule::SEPARATE_SIMPLE ||
-                   params.edge_weight_rule == EdgeWeightRule::SEPARATE_PRECISE);
       // Weighted sum with p_in[i] as weight of gu.members[i]
-      dest.merged.p = accumulate_sum(range(N) | to_combined);
+      return accumulate_sum(range(N) | to_combined);
     }
-  } else {
-    // MERGED_PRECISE: The probability that message propagates from VS to at least 1 vertex in Gv (via Gu)
-    BOOST_ASSERT(params.edge_weight_rule == EdgeWeightRule::MERGED_PRECISE);
-    auto U = (1zu << N) - 1; // Universal set {0 ... N-1}
-    auto to_p_in = TRANSFORM_VIEW(p_in[_1]);
-    auto to_p_not_in = TRANSFORM_VIEW(1.0_ep - p_in[_1]);
-    // States are shared for the same pair (Gu, Gv)
-    auto F = make_initial_precise_state_container();
-    auto sum = 0.0_ep;
-    // Traverses all the non-empty subsets of Gu
-    for (auto S = 1zu; S <= U; S++) {
-      // VS ---> u for each u in S
-      auto p_enter_1 = accumulate_product(indices_in_bitset(N, S) | to_p_in);
-      // VS -/-> u for each u in U - S
-      auto p_enter_0 = accumulate_product(indices_in_bitset(N, U ^ S) | to_p_not_in);
-      // S ---> Gv
-      auto p_pass = get_merged_p_precise(dest, gu, gv, F, S);
-      constexpr auto msg_pattern = "S = {1:#0{0}b}:\n\tp(VS ---> S) = {2:.4f}"
-                                   "\n\tp(VS -/-> S) = {3:.4f}\n\tp(S ---> Gv) = {4:.4f}";
-      MYLOG_FMT_TRACE(msg_pattern, N + 2, S, p_enter_1, p_enter_0, p_pass); // 2 : extra width of the prefix "0b"
-      sum += p_enter_1 * p_enter_0 * p_pass;
-    }
-    BOOST_ASSERT_MSG(sum <= 1.0, "Implementation error: probability sum is out of range [0, 1].");
-    // Conditional probability: P(VS -> gu.members -> gv.members) / P(VS -> gu.members)
-    dest.merged.p = sum / at_least_1_probability_r(p_in);
-  }
+  } // if (params.edge_weight_rule != EdgeWeightRule::MERGED_PRECISE)
 
-  // Part (2): merged.p_seed, which only considers the best candidate inside the group gu
+  // MERGED_PRECISE: The probability that message propagates from VS to at least 1 vertex in Gv (via Gu)
+  BOOST_ASSERT(params.edge_weight_rule == EdgeWeightRule::MERGED_PRECISE);
+  auto U = (1zu << N) - 1; // Universal set {0 ... N-1}
+  auto to_p_in = TRANSFORM_VIEW(p_in[_1]);
+  auto to_p_not_in = TRANSFORM_VIEW(1.0_ep - p_in[_1]);
+  // States are shared for the same pair (Gu, Gv)
+  auto F = make_initial_precise_state_container();
+  auto sum = 0.0_ep;
+  // Traverses all the non-empty subsets of Gu
+  for (auto S = 1zu; S <= U; S++) {
+    // VS ---> u for each u in S
+    auto p_enter_1 = accumulate_product(indices_in_bitset(N, S) | to_p_in);
+    // VS -/-> u for each u in U - S
+    auto p_enter_0 = accumulate_product(indices_in_bitset(N, U ^ S) | to_p_not_in);
+    // S ---> Gv
+    auto p_pass = get_merged_p_precise(precise_ctx, &F, S);
+    constexpr auto msg_pattern = "S = {1:#0{0}b}:"
+                                 "\n\tp(VS ---> S)      = {2:.4f}"
+                                 "\n\tp(VS -/-> Gu - S) = {3:.4f}"
+                                 "\n\tp(S  ---> Gv)     = {4:.4f}";
+    MYLOG_FMT_TRACE(msg_pattern, N + 2, S, p_enter_1, p_enter_0, p_pass); // 2 : extra width of the prefix "0b"
+    sum += p_enter_1 * p_enter_0 * p_pass;
+  }
+  BOOST_ASSERT_MSG(sum >= 0.0 && sum <= 1.0, "Implementation error: probability sum is out of range [0, 1].");
+  // Conditional probability: P(VS -> gu.members -> gv.members) / P(VS -> gu.members)
+  return sum / at_least_1_probability_r(p_in);
+}
+
+auto merge_coarsened_wim_edge_p(WIMCoarsenedEdgeDetails& dest, const WIMCoarsenedEdgeDetails* inv_dest,
+                                const WIMCoarsenedVertexDetails& gu, const WIMCoarsenedVertexDetails& gv,
+                                const CoarseningParams& params) -> void {
+  auto heuristics = get_normalized_heuristic_p_in( //
+      dest, inv_dest, gu, gv, params.in_out_heuristic_rule, NormalizedHeuristics::KEEPS_WHEN_ALL_ZERO);
+  dest.merged.p = get_merged_p(dest.p_cross, gu.p_internal, heuristics, gu.n_members(), gv.n_members(), params);
+}
+
+auto merge_coarsened_wbim_edge_p(WBIMCoarsenedEdgeDetails& dest, const WBIMCoarsenedEdgeDetails* inv_dest,
+                                 const WBIMCoarsenedVertexDetails& gu, const WBIMCoarsenedVertexDetails& gv,
+                                 const CoarseningParams& params) -> void {
+  auto heuristics = [&]() {
+    if (gu.is_seed || rule_prefix_is_seed(params.in_out_heuristic_rule)) {
+      return get_normalized_heuristic_p_in( //
+          gu, params.in_out_heuristic_rule, NormalizedHeuristics::TO_UNIFORM_WHEN_ALL_ZERO);
+    }
+    return get_normalized_heuristic_p_in( //
+        dest, inv_dest, gu, gv, params.in_out_heuristic_rule, NormalizedHeuristics::KEEPS_WHEN_ALL_ZERO);
+  }();
+  BOOST_ASSERT_MSG(!gu.is_seed || (heuristics.p.size() == 1 && heuristics.p[0] == 1.0_ep),
+                   "Seed group with more than 1 member is disallowed.");
+  dest.merged.p = get_merged_p(dest.p_cross, gu.p_internal, heuristics, gu.n_members(), gv.n_members(), params);
+}
+
+auto merge_coarsened_wim_edge_p_seed(WIMCoarsenedEdgeDetails& dest, const WIMCoarsenedVertexDetails& gu,
+                                     const WIMCoarsenedVertexDetails& gv, const CoarseningParams& params) -> void {
+  auto N = gu.n_members();
+  // Special case: Gu has only 1 member {u}
+  if (N == 1) {
+    // Note: the seed path is always enabled, whether or not there's in-edge to u.
+    dest.merged.p_seed = at_least_1_probability_r(dest.p_seed_cross[0] | views::take(gv.n_members()));
+    return;
+  }
+  BOOST_ASSERT_MSG(N == 2 || N == 3, "Group size other than 1, 2, 3 is not supported.");
   dest.merged.p_seed = [&]() {
-    if (params.edge_seed_weight_rule == EdgeSeedWeightRule::BEST_SEED_INDEX) {
-      auto res = get_merged_p_simple(dest, gu, gv, gu.best_seed_index, true);
+    if (params.seed_edge_weight_rule == SeedEdgeWeightRule::BEST_SEED_INDEX) {
+      auto res = get_wim_merged_p_simple(dest, gu, gv, gu.best_seed_index, true);
       MYLOG_FMT_TRACE("p_seed from group {} to {} = {:.4f}, starting from the locally best seed candidate #{}", //
                       gu.members, gv.members, res, gu.members[gu.best_seed_index]);
       return res;
     }
     auto estimated_gain_as_seed = StaticVector<edge_probability_t, MAX_N_MEMBERS>(N);
     for (auto j0 : range(N)) {
-      estimated_gain_as_seed[j0] = get_merged_p_simple(dest, gu, gv, j0, true);
+      estimated_gain_as_seed[j0] = get_wim_merged_p_simple(dest, gu, gv, j0, true);
     }
     MYLOG_FMT_TRACE("Estimated gain as seed of group {} = {}", gu.members, estimated_gain_as_seed);
-    if (params.edge_seed_weight_rule == EdgeSeedWeightRule::AVERAGE) {
+    if (params.seed_edge_weight_rule == SeedEdgeWeightRule::AVERAGE) {
       return accumulate_sum(estimated_gain_as_seed) / N;
     }
-    BOOST_ASSERT(params.edge_seed_weight_rule == EdgeSeedWeightRule::MAX);
+    BOOST_ASSERT(params.seed_edge_weight_rule == SeedEdgeWeightRule::MAX);
     return ranges::max(estimated_gain_as_seed);
   }();
+}
 
+auto merge_coarsened_wbim_edge_p_boost(WBIMCoarsenedEdgeDetails& dest, const WBIMCoarsenedEdgeDetails* inv_dest,
+                                       const WBIMCoarsenedVertexDetails& gu, const WBIMCoarsenedVertexDetails& gv,
+                                       const CoarseningParams& params) -> void {
+  auto N = gu.n_members();
+  BOOST_ASSERT_MSG(N >= 1 && N <= 3, "Group size other than 1, 2, 3 is not supported.");
+  // Assumes the Gv.members[i] is boosted
+  auto heuristics = [&]() {
+    if (gu.is_seed || rule_prefix_is_seed(params.in_out_heuristic_rule)) {
+      return get_normalized_heuristic_p_in( //
+          gu, params.in_out_heuristic_rule, NormalizedHeuristics::TO_UNIFORM_WHEN_ALL_ZERO);
+    }
+    return get_normalized_heuristic_p_in( //
+        dest, inv_dest, gu, gv, params.in_out_heuristic_rule, NormalizedHeuristics::KEEPS_WHEN_ALL_ZERO);
+  }();
+  BOOST_ASSERT_MSG(!gu.is_seed || (heuristics.p.size() == 1 && heuristics.p[0] == 1.0_ep),
+                   "Seed group with more than 1 member is disallowed.");
+
+  auto get_p_boost = [&](size_t i) {
+    auto boosted_p_cross = dest.p_cross;
+    ranges::for_each(range(N), LAMBDA_1(boosted_p_cross[_1][i] = dest.p_boost_cross[_1][i]));
+    MYLOG_FMT_TRACE("p_cross from group {} to {} when target vertex {} is assumed to be boosted:\n\t{:::.4f}", //
+                    gu.members, gv.members, gv.members[i], boosted_p_cross);
+    return get_merged_p(boosted_p_cross, gu.p_internal, heuristics, gu.n_members(), gv.n_members(), params);
+  };
+  dest.merged.p_boost = [&]() {
+    if (params.boosted_edge_weight_rule == BoostedEdgeWeightRule::BEST_BOOSTED_INDEX) {
+      return get_p_boost(gv.best_boosted_index);
+    }
+    // Attempts each boosted target in Gv
+    auto p_as_boosted = StaticVector<edge_probability_t, MAX_N_MEMBERS>(gv.n_members());
+    ranges::for_each(gv.member_indices(), LAMBDA_1(p_as_boosted[_1] = get_p_boost(_1)));
+    MYLOG_FMT_TRACE("Estimated p_boost from group {} to {}: {::.4f}", gu.members, gv.members, p_as_boosted);
+
+    if (params.boosted_edge_weight_rule == BoostedEdgeWeightRule::AVERAGE) {
+      return accumulate_sum(p_as_boosted) / gv.n_members();
+    } else {
+      BOOST_ASSERT(params.boosted_edge_weight_rule == BoostedEdgeWeightRule::MAX);
+      return ranges::max(p_as_boosted);
+    }
+  }();
+}
+
+auto merge_coarsened_wim_graph_edge(WIMCoarsenedEdgeDetails& dest, const WIMCoarsenedEdgeDetails* inv_dest,
+                                    const WIMCoarsenedVertexDetails& gu, const WIMCoarsenedVertexDetails& gv,
+                                    const CoarseningParams& params) -> void {
+  // Part (1) merged.p, see above
+  merge_coarsened_wim_edge_p(dest, inv_dest, gu, gv, params);
+  // Part (2): merged.p_seed, see above
+  merge_coarsened_wim_edge_p_seed(dest, gu, gv, params);
   // Part (3): Ensures 0.0 <= p <= p_seed <= 1.0
   dest.merged.p = std::clamp(dest.merged.p, 0.0_ep, 1.0_ep);
   dest.merged.p_seed = std::clamp(dest.merged.p_seed, dest.merged.p, 1.0_ep);
 }
 
+auto merge_coarsened_wbim_graph_edge(WBIMCoarsenedEdgeDetails& dest, const WBIMCoarsenedEdgeDetails* inv_dest,
+                                     const WBIMCoarsenedVertexDetails& gu, const WBIMCoarsenedVertexDetails& gv,
+                                     const CoarseningParams& params) -> void {
+  // Part (1) merged.p, see above
+  merge_coarsened_wbim_edge_p(dest, inv_dest, gu, gv, params);
+  // Part (2): merged.p_seed, see above
+  merge_coarsened_wbim_edge_p_boost(dest, inv_dest, gu, gv, params);
+  // Part (3): Ensures 0.0 <= p <= p_boost <= 1.0
+  dest.merged.p = std::clamp(dest.merged.p, 0.0_ep, 1.0_ep);
+  dest.merged.p_boost = std::clamp(dest.merged.p_boost, dest.merged.p, 1.0_ep);
+}
+
+// Dispatching
+template <is_coarsened_edge_details EdgeDetailsType, is_coarsened_vertex_details VertexDetailsType>
+auto merge_coarsened_graph_edge(EdgeDetailsType& dest, const EdgeDetailsType* inv_dest, const VertexDetailsType& gu,
+                                const VertexDetailsType& gv, const CoarseningParams& params) -> void {
+  if constexpr (std::is_same_v<VertexDetailsType, WIMCoarsenedVertexDetails>) {
+    return merge_coarsened_wim_graph_edge(dest, inv_dest, gu, gv, params);
+  } else if constexpr (std::is_same_v<VertexDetailsType, WBIMCoarsenedVertexDetails>) {
+    return merge_coarsened_wbim_graph_edge(dest, inv_dest, gu, gv, params);
+  } else {
+    static_assert(rfl::always_false_v<VertexDetailsType>, "Invalid vertex details type.");
+  }
+}
+
 // If is_inverse, then the edge source -> target is mapped to Gv -> Gu
 // Otherwise, the edge source -> target is mapped to Gu -> Gv
+template <is_edge_property E>
 struct EdgeCoarseningItemInfo {
   bool is_inverse;
   vertex_id_t source;
   vertex_id_t target;
-  WIMEdge w;
+  E w;
 
   auto dump() const {
-    constexpr auto msg_pattern = "{{.is_inverse = {}, .source = {}, .target = {}, "
-                                 ".w.p = {:.4f}, .w.p_seed = {:.4f}}}";
-    return fmt::format(msg_pattern, is_inverse, source, target, w.p, w.p_seed);
+    constexpr auto msg_pattern = "{{.is_inverse = {}, .source = {}, .target = {}, .w = {}}}";
+    return fmt::format(msg_pattern, is_inverse, source, target, w);
   }
 };
 
-auto get_coarsened_wim_graph_edges(AdjacencyList<WIMEdge>& graph, const WIMCoarseningDetails& details,
-                                   const CoarseningParams& params) -> DirectedEdgeList<WIMEdge> {
-  using ItemInfo = EdgeCoarseningItemInfo;
+template <is_edge_property E, same_as_either<std::nullptr_t, VertexSet> TargetSkipSet = std::nullptr_t>
+auto make_sorted_edge_items(AdjacencyList<E>& graph, vertex_id_t n_coarsened, std::span<const vertex_id_t> group_id,
+                            const TargetSkipSet& target_skip_set = nullptr) {
+  using ItemInfo = EdgeCoarseningItemInfo<E>;
   using ItemType = VertexPairWithValue<const ItemInfo*>;
 
-  auto m = graph.num_edges();
+  auto [n, m] = graph_n_m(graph);
+  BOOST_ASSERT_MSG(group_id.size() == n, "Size mismatch between |V| and group_id list.");
+  if constexpr (std::is_same_v<TargetSkipSet, VertexSet>) {
+    BOOST_ASSERT_MSG(target_skip_set.n_vertices_in_whole_graph() == n,
+                     "Size mismatch between |V| and target_skip_set.");
+  }
+
+  // Note: RESERVATION is REQUIRED to prevent pointer invalidation
   auto item_info_values = make_reserved_vector<ItemInfo>(m);
   auto items = make_reserved_vector<ItemType>(m);
 
   for (auto [u, v, w] : graph::make_edge_range<0>(graph)) {
-    auto [gu, gv] = details.to_group_id(u, v);
+    auto gu = group_id[u], gv = group_id[v];
     if (gu == gv) {
       continue; // Skips the in-group edges
     }
+    if constexpr (std::is_same_v<TargetSkipSet, VertexSet>) {
+      if (target_skip_set.contains(v)) {
+        continue; // Skips the edges whose target is specified as skipped
+      }
+    }
     if (gu < gv) {
-      auto pos = &item_info_values.emplace_back(ItemInfo{.is_inverse = false, .source = u, .target = v, .w = w});
+      auto info = ItemInfo{.is_inverse = false, .source = u, .target = v, .w = w};
+      auto pos = &item_info_values.emplace_back(info);
       items.push_back(ItemType{.u = gu, .v = gv, .value = pos});
     } else {
-      auto pos = &item_info_values.emplace_back(ItemInfo{.is_inverse = true, .source = u, .target = v, .w = w});
+      auto info = ItemInfo{.is_inverse = true, .source = u, .target = v, .w = w};
+      auto pos = &item_info_values.emplace_back(info);
       items.push_back(ItemType{.u = gv, .v = gu, .value = pos});
     }
   }
-  radix_sort_vertex_pairs(items, details.n_coarsened);
+  radix_sort_vertex_pairs(items, n_coarsened);
   MYLOG_TRACE([&]() {
-    auto str = "Items after radix sorting: ["s;
-    for (const auto& item : items) {
-      str += fmt::format("\n\t{{.u = {}, .v = {}, .value -> {}}}", item.u, item.v, item.value->dump());
-    }
-    str += "\n]";
-    return str;
+    auto to_item_str = LAMBDA_1(fmt::format("\n\t{{.u = {}, .v = {}, .value -> {}}}", _1.u, _1.v, _1.value->dump()));
+    auto contents = items | views::transform(to_item_str) | views::join | views::common;
+    return "Items after radix sorting: ["s + std::string(contents.begin(), contents.end()) + "\n]";
   }());
+  // The internal data pointer is unchanged after moving
+  return std::tuple{std::move(item_info_values), std::move(items)};
+}
 
-  auto res = DirectedEdgeList<WIMEdge>{details.n_coarsened}; // Keeps coarsened |V| unchanged
+template <is_edge_property E, class CoarseningDetailsType,
+          same_as_either<std::nullptr_t, VertexSet> TargetSkipSet = std::nullptr_t>
+auto get_coarsened_graph_edges_impl(AdjacencyList<E>& graph, const CoarseningDetailsType& details,
+                                    const CoarseningParams& params, const TargetSkipSet& target_skip_set = nullptr)
+    -> DirectedEdgeList<E> {
+  using EdgeDetailsType = typename CoarseningDataTraits<E>::EdgeDetails;
+  using ItemInfo = EdgeCoarseningItemInfo<E>;
+  using ItemType = VertexPairWithValue<const ItemInfo*>;
+  auto [item_info_values, items] = make_sorted_edge_items( //
+      graph, details.n_coarsened, details.group_id, target_skip_set);
+
+  auto set_p_cross = [&](EdgeDetailsType& dest, const E& w, size_t j_source, size_t j_target) {
+    if constexpr (requires { dest.p_cross; }) {
+      dest.p_cross[j_source][j_target] = w.p;
+    }
+    if constexpr (requires { dest.p_seed_cross; }) {
+      dest.p_seed_cross[j_source][j_target] = w.p_seed;
+    }
+    if constexpr (requires { dest.p_boost_cross; }) {
+      dest.p_boost_cross[j_source][j_target] = w.p_boost;
+    }
+  };
+
+  auto res = DirectedEdgeList<E>{details.n_coarsened}; // Keeps coarsened |V| unchanged
   res.open_for_push_back();
   // Each chunk represents all the edges of Gu -> Gv (is_inverse == false) and Gv -> Gu (is_inverse == true)
   for (auto chunk : items | CHUNK_BY_VIEW(_1.u == _2.u && _1.v == _2.v)) {
     auto [gu, gv] = chunk[0].vertices();
     auto [Mu, Mv] = details.group_id_to_size(gu, gv);
-    auto E_uv = WIMCoarsenedEdgeDetails{.n_members_left = Mu, .n_members_right = Mv}; // Gu -> Gv
-    auto E_vu = WIMCoarsenedEdgeDetails{.n_members_left = Mv, .n_members_right = Mu}; // Gv -> Gu
+    auto E_uv = EdgeDetailsType(Mu, Mv); // Gu -> Gv
+    auto E_vu = EdgeDetailsType(Mv, Mu); // Gv -> Gu
 
     auto has_uv = false;
     auto has_vu = false;
     for (auto info : chunk | views::transform(&ItemType::value)) {
       auto [j_source, j_target] = details.to_index_in_group(info->source, info->target);
       if (info->is_inverse) {
-        // The edge source -> target is mapped to Gv -> Gu
-        E_vu.p_cross[j_source][j_target] = info->w.p;
-        E_vu.p_seed_cross[j_source][j_target] = info->w.p_seed;
+        set_p_cross(E_vu, info->w, j_source, j_target); // The edge source -> target is mapped to Gv -> Gu
         has_vu = true;
       } else {
-        // The edge source -> target is mapped to Gu -> Gv
-        E_uv.p_cross[j_source][j_target] = info->w.p;
-        E_uv.p_seed_cross[j_source][j_target] = info->w.p_seed;
+        set_p_cross(E_uv, info->w, j_source, j_target); // The edge source -> target is mapped to Gu -> Gv
         has_uv = true;
       }
     }
     if (has_uv) {
-      merge_coarsened_wim_graph_edge(E_uv, &E_vu, details.groups[gu], details.groups[gv], params);
+      merge_coarsened_graph_edge(E_uv, &E_vu, details.groups[gu], details.groups[gv], params);
       res.push_back(gu, gv, E_uv.merged);
       MYLOG_FMT_TRACE("Details of coarsened edge {} -> {}: {:4}", gu, gv, E_uv);
     }
     if (has_vu) {
-      merge_coarsened_wim_graph_edge(E_vu, &E_uv, details.groups[gv], details.groups[gu], params);
+      merge_coarsened_graph_edge(E_vu, &E_uv, details.groups[gv], details.groups[gu], params);
       res.push_back(gv, gu, E_vu.merged);
       MYLOG_FMT_TRACE("Details of coarsened edge {} -> {}: {:4}", gv, gu, E_vu);
     }
@@ -581,14 +819,27 @@ auto get_coarsened_wim_graph_edges(AdjacencyList<WIMEdge>& graph, const WIMCoars
   return res;
 }
 
-template <random_access_range_of<vertex_weight_t> VertexWeights>
-auto get_coarsened_wim_graph_vertex_weights(const WIMCoarseningDetails& details, VertexWeights&& vertex_weights,
-                                            const CoarseningParams& params) -> std::vector<vertex_weight_t> {
+auto get_coarsened_wim_graph_edges(AdjacencyList<WIMEdge>& graph, const WIMCoarseningDetails& details,
+                                   const CoarseningParams& params) -> DirectedEdgeList<WIMEdge> {
+  return get_coarsened_graph_edges_impl(graph, details, params);
+}
+
+auto get_coarsened_wbim_graph_edges(AdjacencyList<WBIMEdge>& graph, const WBIMCoarseningDetails& details,
+                                    const VertexSet& seeds, const CoarseningParams& params)
+    -> DirectedEdgeList<WBIMEdge> {
+  // Edges whose target is a seed vertex are skipped since they have no influence.
+  return get_coarsened_graph_edges_impl(graph, details, params, seeds);
+}
+
+template <is_coarsened_vertex_details VertexDetailsType>
+auto get_coarsened_vertex_weights(const CoarseningDetails<VertexDetailsType>& details,
+                                  std::span<const vertex_weight_t> vertex_weights, const CoarseningParams& params,
+                                  NormalizedHeuristics::PolicyWhenAllZero policy) -> std::vector<vertex_weight_t> {
   auto coarsened_vertex_weights = std::vector<vertex_weight_t>(details.n_coarsened, 0.0);
-  // vc = Coarsened vertex index in range [0, Nc)
+  // Traverses each group. vc = Coarsened vertex index in range [0, Nc)
   for (auto [vc, gc] : details.groups | views::enumerate) {
-    auto [p_in, p_in_all_zero] = get_normalized_heuristic_p_in(gc, params.in_out_heuristic_rule);
     auto& dest = coarsened_vertex_weights[vc];
+    auto [p_in, p_in_all_zero] = get_normalized_heuristic_p_in(gc, params.in_out_heuristic_rule, policy);
 
     if (params.vertex_weight_rule == VertexWeightRule::SUM) {
       // SUM: Simply sums all the vertex weights up
@@ -628,54 +879,50 @@ auto get_coarsened_wim_graph_vertex_weights(const WIMCoarseningDetails& details,
   return coarsened_vertex_weights;
 }
 
-template <class ResultType, random_access_range_of<vertex_weight_t> VertexWeights>
-auto coarsen_wim_graph_w_impl(AdjacencyList<WIMEdge>& graph, InvAdjacencyList<WIMEdge>& inv_graph,
-                              VertexWeights&& vertex_weights, vertex_id_t n_groups,
-                              std::span<const vertex_id_t> group_id, //
-                              const CoarseningParams& params) noexcept -> ResultType {
+struct CoarsenWIMGraphImplResult {
+  DirectedEdgeList<WIMEdge> coarsened_edge_list;
+  std::vector<vertex_weight_t> coarsened_vertex_weights;
+  WIMCoarseningDetails details;
+};
+
+auto coarsen_wim_graph_impl(AdjacencyList<WIMEdge>& graph, InvAdjacencyList<WIMEdge>& inv_graph,
+                            std::span<const vertex_weight_t> vertex_weights, vertex_id_t n_groups,
+                            std::span<const vertex_id_t> group_id, const CoarseningParams& params)
+    -> rfl::Result<CoarsenWIMGraphImplResult> {
   MYLOG_FMT_DEBUG("Parameters: {:4}", params);
+  if (rule_prefix_is_seed(params.in_out_heuristic_rule)) {
+    return rfl::Error{"InOutHeuristicRule::SEED_* is disallowed in WIM graph coarsening "
+                      "since there's no seed known in prior."};
+  }
   auto n = graph::num_vertices(graph);
-  // d_in: unit weight by default
-  auto details = WIMCoarseningDetails{
-      .n = n,
-      .n_coarsened = n_groups,
-      .group_id = std::vector(group_id.begin(), group_id.end()),
-      .index_in_group = std::vector<vertex_id_t>(n),
-      .groups = std::vector<WIMCoarsenedVertexDetails>(n_groups),
-  };
-  MYLOG_FMT_DEBUG("Starts coarsening: n = {}, n_groups = {}", details.n, details.n_coarsened);
+  auto details = WIMCoarseningDetails(               //
+      WIMCoarseningDetails::value_initialize_groups, //
+      n, n_groups, std::vector(group_id.begin(), group_id.end()), std::vector<vertex_id_t>(n));
+  auto step_timer = StepTimer("WIM coarsening after matching");
+  MYLOG_FMT_DEBUG("Starts WIM coarsening: n = {}, n_groups = {}", details.n, details.n_coarsened);
 
-  auto total_time_used = 0.0;
-  auto timer = nw::util::seconds_timer{};
-  auto step_block = [&](int step_index, std::string_view step_description, auto&& step_fn) {
-    timer.start();
-    std::invoke(step_fn);
-    timer.stop();
-    total_time_used += timer.elapsed();
-    constexpr auto msg_pattern = "Done coarsening step {} after Mongoose matching: {}."
-                                 "\n\tTime usage: {:.3f} in current step, {:.3f} in total.";
-    ELOGFMT(INFO, msg_pattern, step_index, step_description, timer.elapsed(), total_time_used);
-  };
+  // Note: For unweighted graph, it's required to create a dummy list like std::vector<vertex_weight_t>(n, 1.0_vw)
+  BOOST_ASSERT_MSG(vertex_weights.size() == n, "Size mismatch");
 
-  // Step 1: groups[].members & groups[].vertex_weights & groups[].heuristics_in & index_in_group
-  // Vertex v is placed in group g
-  step_block(1, "assigning group members", [&]() {
+  // Step 1: groups[].members & groups[].vertex_weights & groups[].heuristics_* & index_in_group
+  step_timer.do_step("assigning group members", [&]() {
+    // Vertex v is placed in group g
     for (auto [v, g] : views::enumerate(group_id)) {
       auto& cur_group = details.groups[g];
-      details.index_in_group[v] = static_cast<vertex_id_t>(cur_group.members.size());
+      details.index_in_group[v] = static_cast<vertex_id_t>(cur_group.n_members());
       cur_group.members.push_back(v);
       cur_group.vertex_weights.push_back(vertex_weights[v]);
       // Heuristics
       cur_group.heuristics_in.push_back( //
-          get_heuristic_in(inv_graph, group_id, vertex_weights, v, params.in_out_heuristic_rule));
+          get_heuristics_in(inv_graph, group_id, vertex_weights, v, params.in_out_heuristic_rule));
       cur_group.heuristics_out.push_back( //
-          get_heuristic_out(graph, group_id, vertex_weights, v, params.in_out_heuristic_rule));
+          get_heuristics_out(graph, group_id, vertex_weights, v, params.in_out_heuristic_rule));
       cur_group.heuristics_out_seed.push_back( //
-          get_heuristic_out_seed(graph, group_id, vertex_weights, v, params.in_out_heuristic_rule));
+          get_heuristics_out_seed(graph, group_id, vertex_weights, v, params.in_out_heuristic_rule));
     }
   });
   // Step 2: groups[].p_internal
-  step_block(2, "assigning p_internal of groups", [&]() {
+  step_timer.do_step("assigning p_internal of groups", [&]() {
     for (auto [u, v, w] : graph::make_edge_range<0>(graph)) {
       auto g = group_id[u];
       if (g == group_id[v]) {
@@ -686,49 +933,190 @@ auto coarsen_wim_graph_w_impl(AdjacencyList<WIMEdge>& graph, InvAdjacencyList<WI
     }
   });
   // Step 3: Calculates the best seed locally in each group
-  step_block(3, "selecting best seed candidate in each group", [&]() {
+  step_timer.do_step("selecting best seed candidate in each group", [&]() {
     for (auto& g : details.groups) {
-      g.best_seed_index = select_best_seed_in_group(g, params.in_out_heuristic_rule).index_in_group;
+      g.best_seed_index = select_best_seed_in_group(g).index_in_group;
     }
   });
   // Step 4: Generates coarsened vertex weights
-  auto coarsened_vertex_weights = std::vector<vertex_weight_t>{};
-  step_block(4, "coarsening vertex weights", [&]() {
-    coarsened_vertex_weights = get_coarsened_wim_graph_vertex_weights(details, vertex_weights, params);
+  auto coarsened_vertex_weights = step_timer.do_step("coarsening vertex weights", [&]() {
+    return get_coarsened_vertex_weights( //
+        details, vertex_weights, params, NormalizedHeuristics::KEEPS_WHEN_ALL_ZERO);
   });
   // Step 5: Finally, builds the result from all the components
-  auto coarsened_edge_list = DirectedEdgeList<WIMEdge>{};
-  step_block(5, "building coarsened edge list", [&]() {
-    coarsened_edge_list = get_coarsened_wim_graph_edges(graph, details, params);
-    BOOST_ASSERT_MSG(graph::num_vertices(coarsened_edge_list) == details.n_coarsened,
-                     "Mismatch between expected and actual # of coarsened vertices.");
+  auto coarsened_edge_list = step_timer.do_step("building edge list of the coarsened graph", [&]() {
+    return get_coarsened_wim_graph_edges(graph, details, params);
   });
 
-  auto res_details = [&]() {
-    if constexpr (std::is_same_v<ResultType, WIMCoarsenGraphDetailedResult>) {
-      // Returns the details directly
-      return std::move(details);
-    } else if constexpr (std::is_same_v<ResultType, WIMCoarsenGraphBriefResult>) {
-      // Transforms detailed to brief information
-      auto brief = WIMCoarseningBrief{
-          .n = n, .n_coarsened = n_groups, .groups = make_reserved_vector<WIMCoarsenedVertexBrief>(n_groups)};
-      for (const auto& u : details.groups) {
-        brief.groups.push_back({.members = u.members, .best_seed_index = u.best_seed_index});
+  return CoarsenWIMGraphImplResult{
+      .coarsened_edge_list = std::move(coarsened_edge_list),
+      .coarsened_vertex_weights = std::move(coarsened_vertex_weights),
+      .details = std::move(details),
+  };
+}
+
+template <class ResultType>
+auto coarsen_wim_graph(AdjacencyList<WIMEdge>& graph, InvAdjacencyList<WIMEdge>& inv_graph,
+                       std::span<const vertex_weight_t> vertex_weights, vertex_id_t n_groups,
+                       std::span<const vertex_id_t> group_id, const CoarseningParams& params)
+    -> rfl::Result<ResultType> {
+  return coarsen_wim_graph_impl(graph, inv_graph, vertex_weights, n_groups, group_id, params)
+      .transform([&](CoarsenWIMGraphImplResult res) {
+        auto res_details = [&]() {
+          if constexpr (std::is_same_v<ResultType, WIMCoarsenGraphDetailedResult>) {
+            return std::move(res.details); // Returns the details directly
+          } else if constexpr (std::is_same_v<ResultType, WIMCoarsenGraphBriefResult>) {
+            return res.details.to_brief(); // Transforms detailed to brief information
+          } else {
+            static_assert(rfl::always_false_v<ResultType>, "Invalid result type.");
+          }
+        }();
+        return ResultType(res.coarsened_edge_list, std::move(res.coarsened_vertex_weights), std::move(res_details));
+      });
+}
+
+struct CoarsenWBIMGraphImplResult {
+  DirectedEdgeList<WBIMEdge> coarsened_edge_list;
+  std::vector<vertex_weight_t> coarsened_vertex_weights;
+  VertexSet coarsened_seeds;
+  WBIMCoarseningDetails details;
+};
+
+auto coarsen_wbim_graph_impl(AdjacencyList<WBIMEdge>& graph, InvAdjacencyList<WBIMEdge>& inv_graph,
+                             std::span<const vertex_weight_t> vertex_weights, const VertexSet& seeds,
+                             vertex_id_t n_groups, std::span<const vertex_id_t> group_id,
+                             const CoarseningParams& params) -> rfl::Result<CoarsenWBIMGraphImplResult> {
+  auto n = graph::num_vertices(graph);
+  auto details = WBIMCoarseningDetails(               //
+      WBIMCoarseningDetails::value_initialize_groups, //
+      n, n_groups, std::vector(group_id.begin(), group_id.end()), std::vector<vertex_id_t>(n));
+  auto step_timer = StepTimer("WBIM coarsening after matching");
+  MYLOG_FMT_DEBUG("Starts WBIM coarsening: n = {}, n_groups = {}, parameters: {:4}", //
+                  details.n, details.n_coarsened, params);
+
+  // Note: For unweighted graph, it's required to create a dummy list like std::vector<vertex_weight_t>(n, 1.0_vw)
+  BOOST_ASSERT_MSG(vertex_weights.size() == n, "Size mismatch");
+
+  // Step 1: groups[].members & groups[].vertex_weights & groups[].heuristics_* & index_in_group
+  auto step_1_res = step_timer.do_step("assigning group members", [&]() -> ResultVoid {
+    // For SEED rule: Calculates heuristic by seed detection
+    auto activation = [&]() -> rfl::Result<WBIMActivationProbability> {
+      if (rule_prefix_is_seed(params.in_out_heuristic_rule)) {
+        return wbim_activation_probability_from_seeds(inv_graph, seeds, params.max_distance_from_seed);
       }
-      return brief;
-    } else {
-      static_assert(rfl::always_false_v<ResultType>, "Invalid result type.");
+      return WBIMActivationProbability{}; // Dummy if unused
+    }();
+    return activation.transform([&](const WBIMActivationProbability& activation) {
+      // Vertex v is placed in group g
+      for (auto [v, g] : views::enumerate(group_id)) {
+        auto& cur_group = details.groups[g];
+        details.index_in_group[v] = static_cast<vertex_id_t>(cur_group.n_members());
+        cur_group.members.push_back(v);
+        cur_group.vertex_weights.push_back(vertex_weights[v]);
+        // Heuristics
+        if (rule_prefix_is_seed(params.in_out_heuristic_rule)) {
+          cur_group.heuristics_in.push_back(activation.p_in[v]);
+          cur_group.heuristics_in_boost.push_back(activation.p_in_boosted[v]);
+
+          auto rule_out = [&params]() {
+            if (params.in_out_heuristic_rule == InOutHeuristicRule::SEED_P) {
+              return InOutHeuristicRule::P;
+            }
+            BOOST_ASSERT(params.in_out_heuristic_rule == InOutHeuristicRule::SEED_W);
+            return InOutHeuristicRule::W;
+          }();
+          // Seeds as out-neighbors are skipped for better heuristics accuracy
+          cur_group.heuristics_out.push_back( //
+              get_heuristics_out(graph, group_id, vertex_weights, seeds, v, rule_out));
+        } else {
+          cur_group.heuristics_in.push_back( //
+              get_heuristics_in(inv_graph, group_id, vertex_weights, v, params.in_out_heuristic_rule));
+          cur_group.heuristics_in_boost.push_back( //
+              get_heuristics_in_boost(inv_graph, group_id, vertex_weights, v, params.in_out_heuristic_rule));
+          // Seeds as out-neighbors are skipped for better heuristics accuracy
+          cur_group.heuristics_out.push_back( //
+              get_heuristics_out(graph, group_id, vertex_weights, seeds, v, params.in_out_heuristic_rule));
+        }
+      }
+      return RESULT_VOID_SUCCESS;
+    });
+  });
+  RFL_RETURN_ON_ERROR(step_1_res);
+
+  // Step 2: groups[].p_internal
+  step_timer.do_step("assigning p_internal of groups", [&]() {
+    for (auto [u, v, w] : graph::make_edge_range<0>(graph)) {
+      auto g = group_id[u];
+      if (g != group_id[v]) {
+        continue;
+      }
+      auto [ju, jv] = details.to_index_in_group(u, v);
+      details.groups[g].p_internal[ju][jv] = w.p;
+      details.groups[g].p_boost_internal[ju][jv] = w.p_boost;
     }
-  }();
-  auto coarsened = WIMAdjacencyListPair{
-      .adj_list = AdjacencyList<WIMEdge>{coarsened_edge_list},
-      .inv_adj_list = InvAdjacencyList<WIMEdge>{coarsened_edge_list},
-      .vertex_weights = std::move(coarsened_vertex_weights),
+  });
+  // Step 3: coarsening seeds
+  auto coarsened_seeds = step_timer.do_step("mapping seeds to coarsened index", [&]() {
+    auto coarsened_seeds = make_reserved_vector<vertex_id_t>(n_groups);
+    for (auto [group_index, g] : details.groups | views::enumerate) {
+      BOOST_ASSERT_MSG(g.n_members() > 0, "Why an empty group here?");
+      if (seeds.contains(g.members[0])) {
+        BOOST_ASSERT_MSG(g.n_members() == 1, "Seeds must be grouped alone.");
+        coarsened_seeds.push_back(group_index);
+        g.is_seed = true;
+      } else {
+        BOOST_ASSERT_MSG(ranges::none_of(g.members, LAMBDA_1(seeds.contains(_1))), "Seeds must be grouped alone.");
+        g.is_seed = false;
+      }
+    }
+    MYLOG_FMT_DEBUG("Coarsened seeds: {}", coarsened_seeds);
+    return VertexSet(n_groups, std::move(coarsened_seeds)); // Coarsened |V| = n_groups
+  });
+  // Step 4: Calculates the best boosted vertex locally in each group
+  step_timer.do_step("selecting best boosted candidate in each group", [&]() {
+    for (auto& g : details.groups) {
+      g.best_boosted_index = select_best_boosted_in_group(g, params.boosted_selection_rule).index_in_group;
+    }
+  });
+  // Step 5: Generates coarsened vertex weights
+  auto coarsened_vertex_weights = step_timer.do_step("coarsening vertex weights", [&]() {
+    auto policy = rule_prefix_is_seed(params.in_out_heuristic_rule) //
+                      ? NormalizedHeuristics::TO_UNIFORM_WHEN_ALL_ZERO
+                      : NormalizedHeuristics::KEEPS_WHEN_ALL_ZERO;
+    return get_coarsened_vertex_weights(details, vertex_weights, params, policy);
+  });
+  // Step 6: Finally, builds the result from all the components
+  auto coarsened_edge_list = step_timer.do_step("building edge list of the coarsened graph", [&]() {
+    return get_coarsened_wbim_graph_edges(graph, details, seeds, params); // Skips the edges whose target is a seed
+  });
+
+  return CoarsenWBIMGraphImplResult{
+      .coarsened_edge_list = std::move(coarsened_edge_list),
+      .coarsened_vertex_weights = std::move(coarsened_vertex_weights),
+      .coarsened_seeds = std::move(coarsened_seeds),
+      .details = std::move(details),
   };
-  return ResultType{
-      .coarsened = std::move(coarsened),
-      .details = std::move(res_details),
-  };
+}
+
+template <class ResultType>
+auto coarsen_wbim_graph(AdjacencyList<WBIMEdge>& graph, InvAdjacencyList<WBIMEdge>& inv_graph,
+                        std::span<const vertex_weight_t> vertex_weights, const VertexSet& seeds, vertex_id_t n_groups,
+                        std::span<const vertex_id_t> group_id, const CoarseningParams& params)
+    -> rfl::Result<ResultType> {
+  return coarsen_wbim_graph_impl(graph, inv_graph, vertex_weights, seeds, n_groups, group_id, params)
+      .transform([&](CoarsenWBIMGraphImplResult res) {
+        auto res_details = [&]() {
+          if constexpr (std::is_same_v<ResultType, WBIMCoarsenGraphDetailedResult>) {
+            return std::move(res.details); // Returns the details directly
+          } else if constexpr (std::is_same_v<ResultType, WBIMCoarsenGraphBriefResult>) {
+            return res.details.to_brief(); // Transforms detailed to brief information
+          } else {
+            static_assert(rfl::always_false_v<ResultType>, "Invalid result type.");
+          }
+        }();
+        return ResultType(res.coarsened_edge_list, std::move(res.coarsened_vertex_weights),
+                          std::move(res.coarsened_seeds), std::move(res_details));
+      });
 }
 
 template <class ResultType>
@@ -738,29 +1126,59 @@ auto coarsen_wim_graph_by_match_generic(const AdjacencyList<WIMEdge>& graph, con
     -> rfl::Result<ResultType> {
   auto n = graph::num_vertices(graph);
   if (vertex_weights.empty()) {
-    return coarsen_wim_graph_w_impl<ResultType>( //
-        as_non_const(graph), as_non_const(inv_graph), views::repeat(1.0_vw, n), n_groups, group_id, params);
+    auto dummy_vertex_weights = std::vector<vertex_weight_t>(n, 1.0_vw);
+    return coarsen_wim_graph<ResultType>( // Uses dummy vertex weight range
+        as_non_const(graph), as_non_const(inv_graph), dummy_vertex_weights, n_groups, group_id, params);
   } else if (vertex_weights.size() != n) {
     constexpr auto msg_pattern = "Size mismatch between vertex weights (which is {}) and |V| (which is {})";
     return rfl::Error{fmt::format(msg_pattern, vertex_weights.size(), n)};
   }
-  return coarsen_wim_graph_w_impl<ResultType>( //
+  return coarsen_wim_graph<ResultType>( //
       as_non_const(graph), as_non_const(inv_graph), vertex_weights, n_groups, group_id, params);
 }
 
-template <class ResultType, random_access_range_of<vertex_weight_t> VertexWeights>
-auto coarsen_wim_graph_w_framework(const AdjacencyList<WIMEdge>& graph, const InvAdjacencyList<WIMEdge>& inv_graph,
-                                   VertexWeights&& vertex_weights, const CoarseningParams& params)
-    -> rfl::Result<ResultType> {
-  // Checking
-  auto [n, m] = graph_n_m(graph);
-  if (vertex_weights.size() != 0 && vertex_weights.size() != n) {
+template <class ResultType>
+auto coarsen_wbim_graph_by_match_generic(const AdjacencyList<WBIMEdge>& graph,
+                                         const InvAdjacencyList<WBIMEdge>& inv_graph,
+                                         std::span<const vertex_weight_t> vertex_weights, const VertexSet& seeds,
+                                         vertex_id_t n_groups, std::span<const vertex_id_t> group_id,
+                                         const CoarseningParams& params) noexcept -> rfl::Result<ResultType> {
+  auto n = graph::num_vertices(graph);
+  if (seeds.n_vertices_in_whole_graph() != n) {
+    constexpr auto msg_pattern = "Size mismatch between seeds (which is {}) and |V| (which is {})";
+    return rfl::Error{fmt::format(msg_pattern, seeds.n_vertices_in_whole_graph(), n)};
+  }
+  if (vertex_weights.empty()) {
+    auto dummy_vertex_weights = std::vector<vertex_weight_t>(n, 1.0_vw);
+    return coarsen_wbim_graph<ResultType>( // Uses dummy vertex weight range
+        as_non_const(graph), as_non_const(inv_graph), dummy_vertex_weights, seeds, n_groups, group_id, params);
+  } else if (vertex_weights.size() != n) {
     constexpr auto msg_pattern = "Size mismatch between vertex weights (which is {}) and |V| (which is {})";
     return rfl::Error{fmt::format(msg_pattern, vertex_weights.size(), n)};
   }
+  return coarsen_wbim_graph<ResultType>( //
+      as_non_const(graph), as_non_const(inv_graph), vertex_weights, seeds, n_groups, group_id, params);
+}
+
+template <class ResultType>
+auto coarsen_wim_graph_framework(const AdjacencyList<WIMEdge>& graph, const InvAdjacencyList<WIMEdge>& inv_graph,
+                                 std::span<const vertex_weight_t> vertex_weights, const CoarseningParams& params)
+    -> rfl::Result<ResultType> {
+  auto [n, m] = graph_n_m(graph);
   auto bidir_graph = merge_wim_edge_to_undirected(graph, params);
   auto [n_groups, group_id] = mongoose_match(bidir_graph, params);
   return coarsen_wim_graph_by_match_generic<ResultType>(graph, inv_graph, vertex_weights, n_groups, group_id, params);
+}
+
+template <class ResultType>
+auto coarsen_wbim_graph_framework(const AdjacencyList<WBIMEdge>& graph, const InvAdjacencyList<WBIMEdge>& inv_graph,
+                                  std::span<const vertex_weight_t> vertex_weights, const VertexSet& seeds,
+                                  const CoarseningParams& params) -> rfl::Result<ResultType> {
+  auto [n, m] = graph_n_m(graph);
+  auto bidir_graph = merge_wbim_edge_to_undirected(graph, params);
+  auto [n_groups, group_id] = mongoose_match(bidir_graph, params);
+  return coarsen_wbim_graph_by_match_generic<ResultType>( //
+      graph, inv_graph, vertex_weights, seeds, n_groups, group_id, params);
 }
 
 template <class CoarsenResultType>
@@ -770,7 +1188,7 @@ auto expand_wim_seed_vertices_impl(const AdjacencyList<WIMEdge>& graph, std::spa
     -> rfl::Result<ExpandSeedResult> {
   auto n = coarsening_result.details.n;            // # of vertices BEFORE coarsening
   auto nc = coarsening_result.details.n_coarsened; // # of vertices AFTER coarsening
-  BOOST_ASSERT_MSG(ranges::size(coarsened_seeds) <= nc, "Expects more than nc vertices as seeds");
+  BOOST_ASSERT_MSG(ranges::size(coarsened_seeds) <= nc, "Expects no more than nc vertices as seeds");
   BOOST_ASSERT_MSG(ranges::max(coarsened_seeds) < nc, "Indices of seeds are out of range [0, nc).");
 
   auto fallback_vertex_weights = std::vector<vertex_weight_t>{};
@@ -791,13 +1209,25 @@ auto expand_wim_seed_vertices_impl(const AdjacencyList<WIMEdge>& graph, std::spa
       expanded_seeds.push_back(group.members[group.best_seed_index]);
     }
   };
-  MYLOG_FMT_DEBUG("coarsened_seeds = {}", coarsened_seeds);
 
-  if (params.seed_expanding_rule == SeedExpandingRule::LOCAL) {
-    // S_LOCAL: Only considers information inside current group
+  // RANDOM: Random choice (used for contrast experiment)
+  if (params.vertex_expanding_rule == VertexExpandingRule::RANDOM) {
+    for (auto sc : coarsened_seeds) {
+      auto& group = coarsening_result.details.groups[sc];
+      auto rand_index = rand_engine() % group.n_members();
+      expanded_seeds.push_back(group.members[rand_index]);
+    }
+    goto expand_wim_seed_vertices_impl_return;
+  }
+
+  // LOCAL: Only considers information inside current group
+  if (params.vertex_expanding_rule == VertexExpandingRule::LOCAL) {
     make_expanded_seeds_as_s_local();
-  } else if (params.seed_expanding_rule == SeedExpandingRule::SIMULATIVE) {
-    // S_SIMULATIVE: Picks one-by-one separately by simulation result of single expanded seed vertex
+    goto expand_wim_seed_vertices_impl_return;
+  }
+
+  // SIMULATIVE: Picks one-by-one separately by simulation result of single expanded seed vertex
+  if (params.vertex_expanding_rule == VertexExpandingRule::SIMULATIVE) {
     for (auto sc : coarsened_seeds) {
       auto& group = coarsening_result.details.groups[sc];
       auto estimated_gain = StaticVector<double, MAX_N_MEMBERS>{};
@@ -812,10 +1242,12 @@ auto expand_wim_seed_vertices_impl(const AdjacencyList<WIMEdge>& graph, std::spa
       MYLOG_FMT_DEBUG(msg_pattern, group.members, sc, estimated_gain, best_expanded_seed);
       expanded_seeds.push_back(best_expanded_seed);
     }
-  } else {
-    // S_ITERATIVE: Result of S_SEPARATE as initial solution
-    BOOST_ASSERT(params.seed_expanding_rule == SeedExpandingRule::ITERATIVE);
-    make_expanded_seeds_as_s_local();
+    goto expand_wim_seed_vertices_impl_return;
+  }
+
+  // ITERATIVE: Each iteration attempts to change a vertex
+  if (params.vertex_expanding_rule == VertexExpandingRule::ITERATIVE) {
+    make_expanded_seeds_as_s_local(); // Result of LOCAL as initial solution
     auto sim_res = simulate(graph, vertex_weights, expanded_seeds, nullptr, **params.simulation_try_count);
     RFL_RETURN_ON_ERROR(sim_res);
     MYLOG_FMT_DEBUG("Initial expanded seed set: {}\n\tWith simulation result = {:.4f}", expanded_seeds, *sim_res);
@@ -861,9 +1293,39 @@ auto expand_wim_seed_vertices_impl(const AdjacencyList<WIMEdge>& graph, std::spa
       }
       MYLOG_FMT_DEBUG("Expanded seed set after iteration #{}: {}", iteration_index, expanded_seeds);
     }
+    goto expand_wim_seed_vertices_impl_return;
   }
+  BOOST_ASSERT_MSG(false, "Unreachable branch due to invalid expanding rule.");
 expand_wim_seed_vertices_impl_return:
   return ExpandSeedResult{.expanded_seeds = std::move(expanded_seeds)};
+}
+
+template <class CoarsenResultType>
+auto expand_wbim_boosted_vertices_impl(const CoarsenResultType& coarsening_result,
+                                       std::span<const vertex_id_t> coarsened_boosted,
+                                       const ExpandingParams& params) noexcept -> rfl::Result<ExpandBoostedResult> {
+  auto n = coarsening_result.details.n;            // # of vertices BEFORE coarsening
+  auto nc = coarsening_result.details.n_coarsened; // # of vertices AFTER coarsening
+  BOOST_ASSERT_MSG(ranges::size(coarsened_boosted) <= nc, "Expects no more than nc vertices as boosted vertices");
+  BOOST_ASSERT_MSG(ranges::max(coarsened_boosted) < nc, "Indices of boosted vertices are out of range [0, nc).");
+
+  auto expanded_boosted = make_reserved_vector<vertex_id_t>(coarsened_boosted.size());
+  if (params.vertex_expanding_rule == VertexExpandingRule::RANDOM) {
+    for (auto sc : coarsened_boosted) {
+      auto& group = coarsening_result.details.groups[sc];
+      auto rand_index = rand_engine() % group.n_members();
+      expanded_boosted.push_back(group.members[rand_index]);
+    }
+  } else if (params.vertex_expanding_rule == VertexExpandingRule::LOCAL) {
+    for (auto sc : coarsened_boosted) {
+      auto& group = coarsening_result.details.groups[sc];
+      expanded_boosted.push_back(group.members[group.best_boosted_index]);
+    }
+  } else {
+    constexpr auto msg_pattern = "Unsupported WBIM expanding rule: {}";
+    return rfl::Error{fmt::format(msg_pattern, magic_enum::enum_name(params.vertex_expanding_rule))};
+  }
+  return ExpandBoostedResult{.expanded_boosted = std::move(expanded_boosted)};
 }
 } // namespace
 
@@ -1048,54 +1510,155 @@ auto coarsen_wim_graph_by_match_d(const AdjacencyList<WIMEdge>& graph, const Inv
       graph, inv_graph, vertex_weights, n_groups, group_id, params);
 }
 
+auto coarsen_wbim_graph_by_match(const AdjacencyList<WBIMEdge>& graph, const InvAdjacencyList<WBIMEdge>& inv_graph,
+                                 std::span<const vertex_weight_t> vertex_weights, const VertexSet& seeds,
+                                 vertex_id_t n_groups, std::span<const vertex_id_t> group_id,
+                                 const CoarseningParams& params) noexcept -> rfl::Result<WBIMCoarsenGraphBriefResult> {
+  return coarsen_wbim_graph_by_match_generic<WBIMCoarsenGraphBriefResult>( //
+      graph, inv_graph, vertex_weights, seeds, n_groups, group_id, params);
+}
+
+auto coarsen_wbim_graph_by_match_d(const AdjacencyList<WBIMEdge>& graph, const InvAdjacencyList<WBIMEdge>& inv_graph,
+                                   std::span<const vertex_weight_t> vertex_weights, const VertexSet& seeds,
+                                   vertex_id_t n_groups, std::span<const vertex_id_t> group_id,
+                                   const CoarseningParams& params) noexcept
+    -> rfl::Result<WBIMCoarsenGraphDetailedResult> {
+  return coarsen_wbim_graph_by_match_generic<WBIMCoarsenGraphDetailedResult>( //
+      graph, inv_graph, vertex_weights, seeds, n_groups, group_id, params);
+}
+
 auto coarsen_wim_graph(const AdjacencyList<WIMEdge>& graph, const InvAdjacencyList<WIMEdge>& inv_graph,
                        std::span<const vertex_weight_t> vertex_weights, const CoarseningParams& params) noexcept
     -> rfl::Result<WIMCoarsenGraphBriefResult> {
-  return coarsen_wim_graph_w_framework<WIMCoarsenGraphBriefResult>(graph, inv_graph, vertex_weights, params);
+  return coarsen_wim_graph_framework<WIMCoarsenGraphBriefResult>(graph, inv_graph, vertex_weights, params);
 }
 
 auto coarsen_wim_graph_d(const AdjacencyList<WIMEdge>& graph, const InvAdjacencyList<WIMEdge>& inv_graph,
                          std::span<const vertex_weight_t> vertex_weights, const CoarseningParams& params) noexcept
     -> rfl::Result<WIMCoarsenGraphDetailedResult> {
-  return coarsen_wim_graph_w_framework<WIMCoarsenGraphDetailedResult>(graph, inv_graph, vertex_weights, params);
+  return coarsen_wim_graph_framework<WIMCoarsenGraphDetailedResult>(graph, inv_graph, vertex_weights, params);
+}
+
+auto coarsen_wbim_graph(const AdjacencyList<WBIMEdge>& graph, const InvAdjacencyList<WBIMEdge>& inv_graph,
+                        std::span<const vertex_weight_t> vertex_weights, const VertexSet& seeds,
+                        const CoarseningParams& params) noexcept -> rfl::Result<WBIMCoarsenGraphBriefResult> {
+  return coarsen_wbim_graph_framework<WBIMCoarsenGraphBriefResult>( //
+      graph, inv_graph, vertex_weights, seeds, params);
+}
+
+auto coarsen_wbim_graph_d(const AdjacencyList<WBIMEdge>& graph, const InvAdjacencyList<WBIMEdge>& inv_graph,
+                          std::span<const vertex_weight_t> vertex_weights, const VertexSet& seeds,
+                          const CoarseningParams& params) noexcept -> rfl::Result<WBIMCoarsenGraphDetailedResult> {
+  return coarsen_wbim_graph_framework<WBIMCoarsenGraphDetailedResult>( //
+      graph, inv_graph, vertex_weights, seeds, params);
 }
 
 // ---- Step 4 ----
 
-auto select_best_seed_in_group(const WIMCoarsenedVertexDetails& v, InOutHeuristicRule rule) noexcept
-    -> SelectBestSeedResult {
-  auto m = v.members.size();
+auto select_best_seed_in_group(const WIMCoarsenedVertexDetails& v) noexcept -> SelectBestSeedResult {
+  auto m = v.n_members();
   if (m == 1) {
     return {.index_in_group = 0};
   }
   BOOST_ASSERT(m <= 3);
-  auto [p_out, p_out_all_zero] = get_normalized_heuristic_p_out(v, rule);
-  auto [p_out_seed, p_out_seed_all_zero] = get_normalized_heuristic_p_out_seed(v, rule);
+  auto& p_out = v.heuristics_out;
+  auto& p_out_seed = v.heuristics_out_seed;
   auto to_estimated_gain = [&](size_t j0) {
-    auto res = edge_probability_t{};
-    if (v.n_members() == 2) {
+    if (m == 2) {
       auto j1 = get_next_j<2>(j0);
-      res = p_out_seed[j0] + v.p_seed_internal[j0][j1] * p_out[j1];
-    } else {
-      BOOST_ASSERT(v.n_members() == 3);
-      auto [j1, j2] = get_next_j<3>(j0);
-      auto p1 = at_least_1_probability(                      //
-          v.p_seed_internal[j0][j1],                         // j0 -> j1
-          v.p_seed_internal[j0][j2] * v.p_internal[j2][j1]); // j0 -> j2 -> j1
-      auto p2 = at_least_1_probability(                      //
-          v.p_seed_internal[j0][j2],                         // j0 -> j2
-          v.p_seed_internal[j0][j1] * v.p_internal[j1][j2]); // j0 -> j1 -> j2
-      res = p_out_seed[j0] + p1 * p_out[j1] + p2 * p_out[j2];
+      return p_out_seed[j0] + v.p_seed_internal[j0][j1] * p_out[j1];
     }
-    return res;
+    BOOST_ASSERT(m == 3);
+    auto [j1, j2] = get_next_j<3>(j0);
+    auto p1 = at_least_1_probability(                      //
+        v.p_seed_internal[j0][j1],                         // j0 -> j1
+        v.p_seed_internal[j0][j2] * v.p_internal[j2][j1]); // j0 -> j2 -> j1
+    auto p2 = at_least_1_probability(                      //
+        v.p_seed_internal[j0][j2],                         // j0 -> j2
+        v.p_seed_internal[j0][j1] * v.p_internal[j1][j2]); // j0 -> j1 -> j2
+    return p_out_seed[j0] + p1 * p_out[j1] + p2 * p_out[j2];
   };
-  auto estimated_gain = [&]() {
+  auto estimated_gain = [&]() -> StaticVector<edge_probability_t, MAX_N_MEMBERS> {
     auto view = range(m) | views::transform(to_estimated_gain);
-    return std::vector(view.begin(), view.end());
+    return {view.begin(), view.end()};
   }();
-  MYLOG_FMT_TRACE("Best seed selection: estimated gain for group {} = {::.4f}", //
-                  v.members, estimated_gain);
+  MYLOG_FMT_TRACE("Best seed selection: estimated gain for group {} = {::.4f}", v.members, estimated_gain);
   return {.index_in_group = static_cast<size_t>(ranges::max_element(estimated_gain) - estimated_gain.begin())};
+}
+
+namespace {
+auto select_best_boosted_in_group_as_source(const WBIMCoarsenedVertexDetails& v) noexcept -> SelectBestBoostedResult {
+  auto m = v.n_members();
+  if (m == 1) {
+    return {.index_in_group = 0};
+  }
+  BOOST_ASSERT(m <= 3);
+  auto to_estimated_gain = [&](size_t j0) -> edge_probability_t {
+    auto delta_h = v.heuristics_in_boost[j0] - v.heuristics_in[j0];
+    if (m == 2) {
+      auto j1 = get_next_j<2>(j0);
+      return delta_h * (v.heuristics_out[j0] + v.p_internal[j0][j1] * v.heuristics_out[j1]);
+    }
+    BOOST_ASSERT(m == 3);
+    auto [j1, j2] = get_next_j<3>(j0);
+    auto p1 = at_least_1_probability(v.p_internal[j0][j1], v.p_internal[j0][j2] * v.p_internal[j2][j1]);
+    auto p2 = at_least_1_probability(v.p_internal[j0][j2], v.p_internal[j0][j1] * v.p_internal[j1][j2]);
+    return delta_h * (v.heuristics_out[j0] + p1 * v.heuristics_out[j1] + p2 * v.heuristics_out[j2]);
+  };
+  auto estimated_gain = [&]() -> StaticVector<edge_probability_t, MAX_N_MEMBERS> {
+    auto view = range(m) | views::transform(to_estimated_gain);
+    return {view.begin(), view.end()};
+  }();
+  MYLOG_FMT_TRACE("Best boosted vertex selection: estimated gain for group {} = {::.4f}", v.members, estimated_gain);
+  return {.index_in_group = static_cast<size_t>(ranges::max_element(estimated_gain) - estimated_gain.begin())};
+}
+
+auto select_best_boosted_in_group_as_target(const WBIMCoarsenedVertexDetails& v) noexcept -> SelectBestBoostedResult {
+  auto m = v.n_members();
+  if (m == 1) {
+    return {.index_in_group = 0};
+  }
+  BOOST_ASSERT(m <= 3);
+  auto to_estimated_gain = [&](size_t j0) -> edge_probability_t {
+    auto delta_h = v.heuristics_in_boost[j0] - v.heuristics_in[j0];
+    if (m == 2) {
+      auto j1 = get_next_j<2>(j0);
+      auto delta_p_1 = v.p_boost_internal[j1][j0] - v.p_internal[j1][j0];
+      // (1) InNeighbor(j0) -> [j0], (2) InNeighbor(j1) -> ... -> [j0]
+      auto delta_in = delta_h + v.heuristics_in[j1] * delta_p_1;
+      return delta_in * v.heuristics_out[j0];
+    }
+    BOOST_ASSERT(m == 3);
+    auto [j1, j2] = get_next_j<3>(j0);
+    // After - Before j0 is boosted: (1) j1 -> [j0]; (2) j1 -> j2 -> [j0]
+    auto delta_p_1 =
+        at_least_1_probability(v.p_boost_internal[j1][j0], v.p_internal[j1][j2] * v.p_boost_internal[j2][j0]) -
+        at_least_1_probability(v.p_internal[j1][j0], v.p_internal[j1][j2] * v.p_internal[j2][j0]);
+    // After - Before j0 is boosted: (1) j3 -> [j0]; (2) j2 -> j1 -> [j0]
+    auto delta_p_2 =
+        at_least_1_probability(v.p_boost_internal[j2][j0], v.p_internal[j2][j1] * v.p_boost_internal[j1][j0]) -
+        at_least_1_probability(v.p_internal[j2][j0], v.p_internal[j2][j1] * v.p_internal[j1][j0]);
+    // (1) InNeighbor(j0) -> [j0], (2) InNeighbor(j1) -> ... -> [j0], (3) InNeighbor(j2) -> ... -> [j0]
+    auto delta_in = delta_h + v.heuristics_in[j1] * delta_p_1 + v.heuristics_in[j2] * delta_p_2;
+    return delta_in * v.heuristics_out[j0];
+  };
+  auto estimated_gain = [&]() -> StaticVector<edge_probability_t, MAX_N_MEMBERS> {
+    auto view = range(m) | views::transform(to_estimated_gain);
+    return {view.begin(), view.end()};
+  }();
+  MYLOG_FMT_TRACE("Best boosted vertex selection: estimated gain for group {} = {::.4f}", v.members, estimated_gain);
+  return {.index_in_group = static_cast<size_t>(ranges::max_element(estimated_gain) - estimated_gain.begin())};
+}
+} // namespace
+
+auto select_best_boosted_in_group(const WBIMCoarsenedVertexDetails& v, BoostedSelectionRule rule) noexcept
+    -> SelectBestBoostedResult {
+  if (rule == BoostedSelectionRule::AS_SOURCE) {
+    return select_best_boosted_in_group_as_source(v);
+  } else {
+    BOOST_ASSERT(rule == BoostedSelectionRule::AS_TARGET);
+    return select_best_boosted_in_group_as_target(v);
+  }
 }
 
 auto expand_wim_seed_vertices(const AdjacencyList<WIMEdge>& graph, std::span<const vertex_weight_t> vertex_weights,
@@ -1110,4 +1673,21 @@ auto expand_wim_seed_vertices_d(const AdjacencyList<WIMEdge>& graph, std::span<c
                                 std::span<const vertex_id_t> coarsened_seeds, const ExpandingParams& params) noexcept
     -> rfl::Result<ExpandSeedResult> {
   return expand_wim_seed_vertices_impl(graph, vertex_weights, coarsening_result, coarsened_seeds, params);
+}
+
+auto expand_wbim_boosted_vertices(const AdjacencyList<WBIMEdge>& graph, std::span<const vertex_weight_t> vertex_weights,
+                                  const WBIMCoarsenGraphBriefResult& coarsening_result,
+                                  std::span<const vertex_id_t> coarsened_boosted,
+                                  const ExpandingParams& params) noexcept -> rfl::Result<ExpandBoostedResult> {
+  // Note: graph and vertex_weights are unused yet, reserved for further implementation.
+  return expand_wbim_boosted_vertices_impl(coarsening_result, coarsened_boosted, params);
+}
+
+auto expand_wbim_boosted_vertices_d(const AdjacencyList<WBIMEdge>& graph,
+                                    std::span<const vertex_weight_t> vertex_weights,
+                                    const WBIMCoarsenGraphDetailedResult& coarsening_result,
+                                    std::span<const vertex_id_t> coarsened_boosted,
+                                    const ExpandingParams& params) noexcept -> rfl::Result<ExpandBoostedResult> {
+  // Note: graph and vertex_weights are unused yet, reserved for further implementation.
+  return expand_wbim_boosted_vertices_impl(coarsening_result, coarsened_boosted, params);
 }

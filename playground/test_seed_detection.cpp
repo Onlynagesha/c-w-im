@@ -10,7 +10,7 @@ int main() {
   auto n = graph::num_vertices(graph);
   auto seeds = VertexSet(n, {1, 4, 6, 7, 8, 10, 12, 14, 16, 17});
 
-  auto [seed_prob, seed_prob_boosted] = *wbim_detect_probability_from_seeds(inv_graph, seeds, n);
+  auto [seed_prob, seed_prob_boosted] = *wbim_activation_probability_from_seeds(inv_graph, seeds, n);
   ELOG_INFO << dump_array("seed_prob", seed_prob);
   ELOG_INFO << dump_array("seed_prob_boosted", seed_prob_boosted);
 

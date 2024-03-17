@@ -14,7 +14,7 @@ inline const auto SAMPLE_EDGES_1 = std::vector<EdgeTuple>{
 // (source, target, p)
 inline const auto SAMPLE_EDGES_1_LEFT =
     std::vector<EdgeTuple>{{0, 1, 0.30}, {2, 3, 0.32},       {4, 5, 0.34},       {0, 2, 0.41},
-                           {2, 4, 0.44}, {6, 0, 0.44444444}, {6, 2, 0.33333333}, {6, 4, 0.22222222}};
+                           {2, 4, 0.44}, {6, 0, 0.45045045}, {6, 2, 0.27027027}, {6, 4, 0.27927927}};
 
 // (source, target, p)
 inline const auto SAMPLE_EDGES_1_RIGHT =

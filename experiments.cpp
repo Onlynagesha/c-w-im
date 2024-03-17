@@ -421,7 +421,7 @@ auto do_expand_seeds(const WIMAdjacencyListPair& original_graph,
                      vertex_id_t n_fast_expanding_levels, const ExpandingParams& raw_params,
                      json* json_expanded_seeds = nullptr, json* json_time_used = nullptr) -> rfl::Result<VertexList> {
   auto level = static_cast<vertex_id_t>(coarsen_results.size());
-  auto rule_local = ExpandingParams{.seed_expanding_rule = SeedExpandingRule::LOCAL};
+  auto rule_local = ExpandingParams{.vertex_expanding_rule = VertexExpandingRule::LOCAL};
   const auto& [adj_list, inv_adj_list, vertex_weights] = original_graph;
 
   auto timer = nw::util::seconds_timer{};
@@ -435,7 +435,7 @@ auto do_expand_seeds(const WIMAdjacencyListPair& original_graph,
         return &rule_local;
       }
       ELOGFMT(INFO, "Uses {} policy when expanding back to level {}.", //
-              magic_enum::enum_name(raw_params.seed_expanding_rule), back_level);
+              magic_enum::enum_name(raw_params.vertex_expanding_rule), back_level);
       return &raw_params;
     }();
     auto expand_res = [&]() {

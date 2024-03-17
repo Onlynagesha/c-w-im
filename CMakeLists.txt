@@ -101,8 +101,15 @@ foreach (target create-dataset to-matrix-market)
     target_link_libraries(${target} PRIVATE io-components)
 endforeach()
 
-add_executable(test-coarsening
-    playground/test_coarsening.cpp
+add_executable(test-wim-coarsening
+    playground/test_wim_coarsening.cpp
+    coarsening.cpp
+    coarsening_dump.cpp
+    wim.cpp
+    wim_dump.cpp)
+
+add_executable(test-wbim-coarsening
+    playground/test_wbim_coarsening.cpp
     coarsening.cpp
     coarsening_dump.cpp
     wim.cpp
@@ -122,7 +129,12 @@ add_executable(test-prr-sketching
     wim.cpp
     wim_dump.cpp)
 
-SET(PLAYGROUND_TESTS test-coarsening test-ranking-algorithms test-seed-detection test-prr-sketching)
+SET(PLAYGROUND_TESTS 
+    test-wim-coarsening 
+    test-wbim-coarsening 
+    test-ranking-algorithms 
+    test-seed-detection 
+    test-prr-sketching)
 
 foreach (target ${PLAYGROUND_TESTS})
     target_link_libraries(${target} PRIVATE io-components)

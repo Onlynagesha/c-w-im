@@ -124,45 +124,6 @@ auto wim_simulate_generic(const AdjacencyList<E>& graph, const VertexSet& seeds,
     return res;
   }
 }
-
-template <is_edge_property E>
-auto detect_probability_from_seeds_generic(const InvAdjacencyList<E>& inv_graph, const VertexSet& seeds,
-                                           vertex_id_t max_distance) -> rfl::Result<DetectProbabilityFromSeedsResult> {
-  auto n = graph::num_vertices(inv_graph);
-  auto res = DetectProbabilityFromSeedsResult(n);
-  auto temp = DetectProbabilityFromSeedsResult(n);
-
-  auto paths = make_reserved_vector<edge_probability_t>(n);
-  auto paths_boosted = make_reserved_vector<edge_probability_t>(n);
-  for (auto k = 1_vid; k <= max_distance; k++) {
-    for (auto v : vertices(inv_graph)) {
-      if (seeds.contains(v)) {
-        continue; // F[s] == F_boost[s] == 0.0 for each seed s
-      }
-      paths.clear();
-      paths_boosted.clear();
-      for (auto [u, w] : inv_graph[v]) {
-        if (seeds.contains(u)) {
-          paths.push_back(get_p_seed(w));
-          paths_boosted.push_back(get_p_seed_or_boost(w));
-        } else {
-          paths.push_back(w.p * res.p_in[u]);
-          paths_boosted.push_back(get_p_boost(w) * res.p_in[u]);
-        }
-      }
-      temp.p_in[v] = at_least_1_probability_r(paths);
-      temp.p_in_boosted[v] = at_least_1_probability_r(paths_boosted);
-    }
-    MYLOG_FMT_TRACE("F[{}][] = {::.4f}", k, temp.p_in);
-    MYLOG_FMT_TRACE("F_boost[{}][] = {::.4f}", k, temp.p_in_boosted);
-    if (temp.equals_with(res)) {
-      MYLOG_FMT_TRACE("Early stops when k = {}", k);
-      break;
-    }
-    temp.swap(res);
-  }
-  return std::move(res);
-}
 } // namespace
 
 auto RRSketchSet::append_single(std::span<vertex_id_t> vertices) noexcept -> void {
@@ -754,12 +715,40 @@ auto wbim_simulate_p(const AdjacencyList<WBIMEdge>& graph, const VertexSet& seed
   return wim_simulate_generic<std::vector<double>>(graph, seeds, boosted_vertices, views::repeat(1.0_vw), try_count);
 }
 
-auto wim_detect_probability_from_seeds(const InvAdjacencyList<WIMEdge>& inv_graph, const VertexSet& seeds,
-                                       vertex_id_t max_distance) -> rfl::Result<DetectProbabilityFromSeedsResult> {
-  return detect_probability_from_seeds_generic(inv_graph, seeds, max_distance);
-}
+auto wbim_activation_probability_from_seeds(const InvAdjacencyList<WBIMEdge>& inv_graph, const VertexSet& seeds,
+                                            vertex_id_t max_distance) -> rfl::Result<WBIMActivationProbability> {
+  auto n = graph::num_vertices(inv_graph);
+  auto res = WBIMActivationProbability(n);
+  auto temp = WBIMActivationProbability(n);
 
-auto wbim_detect_probability_from_seeds(const InvAdjacencyList<WBIMEdge>& inv_graph, const VertexSet& seeds,
-                                        vertex_id_t max_distance) -> rfl::Result<DetectProbabilityFromSeedsResult> {
-  return detect_probability_from_seeds_generic(inv_graph, seeds, max_distance);
+  auto paths = make_reserved_vector<edge_probability_t>(n);
+  auto paths_boosted = make_reserved_vector<edge_probability_t>(n);
+  for (auto k = 1_vid; k <= max_distance; k++) {
+    for (auto v : vertices(inv_graph)) {
+      if (seeds.contains(v)) {
+        continue; // F[s] == F_boost[s] == 0.0 for each seed s
+      }
+      paths.clear();
+      paths_boosted.clear();
+      for (auto [u, w] : inv_graph[v]) {
+        if (seeds.contains(u)) {
+          paths.push_back(w.p);
+          paths_boosted.push_back(w.p_boost);
+        } else {
+          paths.push_back(w.p * res.p_in[u]);
+          paths_boosted.push_back(w.p_boost * res.p_in[u]);
+        }
+      }
+      temp.p_in[v] = at_least_1_probability_r(paths);
+      temp.p_in_boosted[v] = at_least_1_probability_r(paths_boosted);
+    }
+    MYLOG_FMT_TRACE("F[{}][] = {::.4f}", k, temp.p_in);
+    MYLOG_FMT_TRACE("F_boost[{}][] = {::.4f}", k, temp.p_in_boosted);
+    if (temp.equals_with(res)) {
+      MYLOG_FMT_TRACE("Early stops when k = {}", k);
+      break;
+    }
+    temp.swap(res);
+  }
+  return std::move(res);
 }
