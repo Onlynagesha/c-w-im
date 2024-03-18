@@ -87,17 +87,28 @@ auto sort_and_check_sketching_params(SketchingParams& sketching) -> std::optiona
 }
 } // namespace
 
-auto ReadGraphParams::parse_from_args(int argc, char** argv) noexcept -> rfl::Result<ReadGraphParams> {
-  return parse_from_args_generic<ReadGraphParams>(
+auto CreateWIMDatasetParams::parse_from_args(int argc, char** argv) noexcept -> rfl::Result<CreateWIMDatasetParams> {
+  return parse_from_args_generic<CreateWIMDatasetParams>(
              argc, argv, // Appends --config etc.
              manual_add_config_arguments<ManualConfigArguments{
                  .has_config = true, .requires_input_file = true, .requires_output_file = true}>,
-             read_arguments_from_config_file<ReadGraphParams>)
-      .and_then([](ReadGraphParams params) -> rfl::Result<ReadGraphParams> {
-        if (*params.lambda_in <= 0 && *params.lambda_seed <= 0) {
+             read_arguments_from_config_file<CreateWIMDatasetParams>)
+      .and_then([](CreateWIMDatasetParams params) -> rfl::Result<CreateWIMDatasetParams> {
+        if (*params.common->lambda_in <= 0 && *params.lambda_seed <= 0) {
           return rfl::Error{"At least one of lambda_in and lambdas_seed shall be positive."};
         }
-        if (*params.lambda_in <= 0 && *params.lambda_boost <= 0) {
+        return std::move(params);
+      });
+}
+
+auto CreateWBIMDatasetParams::parse_from_args(int argc, char** argv) noexcept -> rfl::Result<CreateWBIMDatasetParams> {
+  return parse_from_args_generic<CreateWBIMDatasetParams>(
+             argc, argv, // Appends --config etc.
+             manual_add_config_arguments<ManualConfigArguments{
+                 .has_config = true, .requires_input_file = true, .requires_output_file = true}>,
+             read_arguments_from_config_file<CreateWBIMDatasetParams>)
+      .and_then([](CreateWBIMDatasetParams params) -> rfl::Result<CreateWBIMDatasetParams> {
+        if (*params.common->lambda_in <= 0 && *params.lambda_boost <= 0) {
           return rfl::Error{"At least one of lambda_in and lambda_boost shall be positive."};
         }
         return std::move(params);

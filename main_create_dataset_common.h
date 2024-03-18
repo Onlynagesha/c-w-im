@@ -1,3 +1,5 @@
+#pragma once
+
 #include "create_dataset.h"
 #include "dump.h"
 #include "utils/easylog.h"
@@ -16,8 +18,9 @@
 constexpr auto VERIFY_NUM_EDGES_THRESHOLD = 20;
 constexpr auto PREVIEW_COUNT = 10;
 
-auto verify_correctness(const std::string& data_file, const DirectedEdgeList<WIMEdge>& expected_graph) -> ResultVoid {
-  return read_directed_wim_edge_list(data_file).and_then([&](const auto& read_result) -> ResultVoid {
+template <is_edge_property E>
+inline auto verify_correctness(const std::string& data_file, const DirectedEdgeList<E>& expected_graph) -> ResultVoid {
+  return read_directed_edge_list<E>(data_file).and_then([&](const auto& read_result) -> ResultVoid {
     ELOG_INFO << "Starts verification.";
     // Checking |V| and |E|
     VERIFY_CHECK(read_result.edge_list.num_vertices(), expected_graph.num_vertices());
@@ -33,10 +36,12 @@ auto verify_correctness(const std::string& data_file, const DirectedEdgeList<WIM
   });
 }
 
-auto main_worker(int argc, char** argv) -> ResultVoid try {
-  return ReadGraphParams::parse_from_args(argc, argv).and_then([](ReadGraphParams params) {
-    easylog::set_min_severity(params.log_level);
-    auto graph = create_wim_dataset(params);
+template <is_edge_property E>
+inline auto main_worker(int argc, char** argv) -> ResultVoid try {
+  using ParamsType = CreateDatasetParamsTraits<E>::ParamsType;
+  return ParamsType::parse_from_args(argc, argv).and_then([](ParamsType params) {
+    easylog::set_min_severity(params.common->log_level);
+    auto graph = create_dataset<E>(params);
 
     auto preview_str = fmt::format("Preview of first (up to) {} vertices:", PREVIEW_COUNT);
     for (auto u : vertices(graph.edge_list) | views::take(PREVIEW_COUNT)) {
@@ -48,27 +53,14 @@ auto main_worker(int argc, char** argv) -> ResultVoid try {
     }
     MYLOG_DEBUG(preview_str);
 
-    return write_directed_edge_list_r(graph, params.output_file).and_then([&](auto) -> ResultVoid {
+    return write_directed_edge_list_r(graph, params.common->output_file).and_then([&](auto) -> ResultVoid {
       constexpr auto msg_pattern = "Successfully serializes dataset from input '{}' to output '{}'.";
-      ELOGFMT(INFO, msg_pattern, params.input_file, params.output_file);
+      ELOGFMT(INFO, msg_pattern, params.common->input_file, params.common->output_file);
       // Verification for small graphs
       return (graph.edge_list.num_edges() <= VERIFY_NUM_EDGES_THRESHOLD)
-                 ? verify_correctness(params.output_file, graph.edge_list)
+                 ? verify_correctness(params.common->output_file, graph.edge_list)
                  : RESULT_VOID_SUCCESS;
     });
   });
 }
 RFL_RESULT_CATCH_HANDLER()
-
-int main(int argc, char** argv) {
-  return main_worker(argc, argv)
-      .and_then([](auto) {
-        ELOG_INFO << "Done creating dataset.";
-        return rfl::Result{0};
-      })
-      .or_else([](const rfl::Error& error) {
-        ELOGFMT(CRITICAL, "ERROR: `{}'", error.what());
-        return rfl::Result{-1};
-      })
-      .value_or(-1);
-}

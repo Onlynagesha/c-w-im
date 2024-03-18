@@ -96,15 +96,24 @@ foreach (target ${EXPERIMENT_EXECUTABLES})
     target_link_libraries(${target} PRIVATE yyjson-components io-components experiment-components)
 endforeach()
 
-add_executable(create-dataset
-    main_create_dataset.cpp
+set(DATASET_IO_EXECUTABLES
+    create-wim-dataset
+    create-wbim-dataset
+    to-matrix-market)
+
+add_executable(create-wim-dataset
+    main_create_wim_dataset.cpp
+    create_dataset.cpp)
+
+add_executable(create-wbim-dataset
+    main_create_wbim_dataset.cpp
     create_dataset.cpp)
 
 add_executable(to-matrix-market
     main_to_matrix_market.cpp
     to_matrix_market.cpp)
 
-foreach (target create-dataset to-matrix-market)
+foreach (target ${DATASET_IO_EXECUTABLES})
     target_link_libraries(${target} PRIVATE yyjson-components io-components)
 endforeach()
 
@@ -136,7 +145,7 @@ endforeach()
 
 foreach(target ${COMPONENT_OBJECTS}
                ${EXPERIMENT_EXECUTABLES}
-               create-dataset to-matrix-market
+               ${DATASET_IO_EXECUTABLES}
                ${PLAYGROUND_TESTS})
     target_compile_options(${target} PRIVATE ${COMMON_COMPILE_OPTIONS})
     target_compile_definitions(${target} PRIVATE ${COMMON_COMPILE_DEFINITIONS})

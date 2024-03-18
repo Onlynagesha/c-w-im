@@ -10,7 +10,8 @@
 #define DUMP_REGISTERED_TYPES_AUTO_GENERATED(F)          \
   F(WIMEdge)                        /* graph_types.h */  \
   F(WBIMEdge)                       /* graph_types.h */  \
-  F(ReadGraphParams)                /* read_dataset.h */ \
+  F(CreateWIMDatasetParams)         /* read_dataset.h */ \
+  F(CreateWBIMDatasetParams)        /* read_dataset.h */ \
   F(CoarseningParams)               /* coarsening.h */   \
   F(WIMSketchingExperimentParams)   /* experiments.h */  \
   F(WBIMSketchingExperimentParams)  /* experiments.h */  \
