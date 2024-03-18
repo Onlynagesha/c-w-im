@@ -5,7 +5,6 @@
 #include "wim.h"
 #include <fmt/ranges.h>
 #include <magic_enum.hpp>
-#include <nwgraph/adaptors/edge_range.hpp>
 
 namespace {
 constexpr auto MAX_N_MEMBERS = CoarsenedVertexDetailsBase::MAX_N_MEMBERS;
@@ -166,15 +165,17 @@ auto radix_sort_vertex_pairs(Range& vertex_pairs, vertex_id_t n) {
 }
 
 template <is_edge_property E>
-auto merge_edge_to_undirected_generic(AdjacencyList<E>& graph, const CoarseningParams& params)
+auto merge_edge_to_undirected_generic(const AdjacencyList<E>& graph, const CoarseningParams& params)
     -> AdjacencyList<edge_probability_t> {
   using ItemType = VertexPairWithValue<edge_probability_t>;
   auto e_pairs = make_reserved_vector<ItemType>(graph.num_edges() + 1);
-  for (auto [u, v, w] : graph::make_edge_range<0>(graph)) {
-    if (u == v) {
-      continue; // Skips self-loops
+  for (auto u : vertices(graph)) {
+    for (auto [v, w] : graph[u]) {
+      if (u == v) {
+        continue; // Skips self-loops
+      }
+      (u < v) ? e_pairs.push_back({u, v, w.p}) : e_pairs.push_back({v, u, w.p});
     }
-    (u < v) ? e_pairs.push_back({u, v, w.p}) : e_pairs.push_back({v, u, w.p});
   }
   radix_sort_vertex_pairs(e_pairs, graph::num_vertices(graph));
   e_pairs.push_back({static_cast<vertex_id_t>(-1), static_cast<vertex_id_t>(-1), 0.0_ep}); // Dummy end
@@ -715,8 +716,8 @@ struct EdgeCoarseningItemInfo {
 };
 
 template <is_edge_property E, same_as_either<std::nullptr_t, VertexSet> TargetSkipSet = std::nullptr_t>
-auto make_sorted_edge_items(AdjacencyList<E>& graph, vertex_id_t n_coarsened, std::span<const vertex_id_t> group_id,
-                            const TargetSkipSet& target_skip_set = nullptr) {
+auto make_sorted_edge_items(const AdjacencyList<E>& graph, vertex_id_t n_coarsened,
+                            std::span<const vertex_id_t> group_id, const TargetSkipSet& target_skip_set = nullptr) {
   using ItemInfo = EdgeCoarseningItemInfo<E>;
   using ItemType = VertexPairWithValue<const ItemInfo*>;
 
@@ -731,24 +732,27 @@ auto make_sorted_edge_items(AdjacencyList<E>& graph, vertex_id_t n_coarsened, st
   auto item_info_values = make_reserved_vector<ItemInfo>(m);
   auto items = make_reserved_vector<ItemType>(m);
 
-  for (auto [u, v, w] : graph::make_edge_range<0>(graph)) {
-    auto gu = group_id[u], gv = group_id[v];
-    if (gu == gv) {
-      continue; // Skips the in-group edges
-    }
-    if constexpr (std::is_same_v<TargetSkipSet, VertexSet>) {
-      if (target_skip_set.contains(v)) {
-        continue; // Skips the edges whose target is specified as skipped
+  for (auto u : vertices(graph)) {
+    auto gu = group_id[u];
+    for (auto [v, w] : graph[u]) {
+      auto gv = group_id[v];
+      if (gu == gv) {
+        continue; // Skips the in-group edges
       }
-    }
-    if (gu < gv) {
-      auto info = ItemInfo{.is_inverse = false, .source = u, .target = v, .w = w};
-      auto pos = &item_info_values.emplace_back(info);
-      items.push_back(ItemType{.u = gu, .v = gv, .value = pos});
-    } else {
-      auto info = ItemInfo{.is_inverse = true, .source = u, .target = v, .w = w};
-      auto pos = &item_info_values.emplace_back(info);
-      items.push_back(ItemType{.u = gv, .v = gu, .value = pos});
+      if constexpr (std::is_same_v<TargetSkipSet, VertexSet>) {
+        if (target_skip_set.contains(v)) {
+          continue; // Skips the edges whose target is specified as skipped
+        }
+      }
+      if (gu < gv) {
+        auto info = ItemInfo{.is_inverse = false, .source = u, .target = v, .w = w};
+        auto pos = &item_info_values.emplace_back(info);
+        items.push_back(ItemType{.u = gu, .v = gv, .value = pos});
+      } else {
+        auto info = ItemInfo{.is_inverse = true, .source = u, .target = v, .w = w};
+        auto pos = &item_info_values.emplace_back(info);
+        items.push_back(ItemType{.u = gv, .v = gu, .value = pos});
+      }
     }
   }
   radix_sort_vertex_pairs(items, n_coarsened);
@@ -763,7 +767,7 @@ auto make_sorted_edge_items(AdjacencyList<E>& graph, vertex_id_t n_coarsened, st
 
 template <is_edge_property E, class CoarseningDetailsType,
           same_as_either<std::nullptr_t, VertexSet> TargetSkipSet = std::nullptr_t>
-auto get_coarsened_graph_edges_impl(AdjacencyList<E>& graph, const CoarseningDetailsType& details,
+auto get_coarsened_graph_edges_impl(const AdjacencyList<E>& graph, const CoarseningDetailsType& details,
                                     const CoarseningParams& params, const TargetSkipSet& target_skip_set = nullptr)
     -> DirectedEdgeList<E> {
   using EdgeDetailsType = typename CoarseningDataTraits<E>::EdgeDetails;
@@ -820,12 +824,12 @@ auto get_coarsened_graph_edges_impl(AdjacencyList<E>& graph, const CoarseningDet
   return res;
 }
 
-auto get_coarsened_wim_graph_edges(AdjacencyList<WIMEdge>& graph, const WIMCoarseningDetails& details,
+auto get_coarsened_wim_graph_edges(const AdjacencyList<WIMEdge>& graph, const WIMCoarseningDetails& details,
                                    const CoarseningParams& params) -> DirectedEdgeList<WIMEdge> {
   return get_coarsened_graph_edges_impl(graph, details, params);
 }
 
-auto get_coarsened_wbim_graph_edges(AdjacencyList<WBIMEdge>& graph, const WBIMCoarseningDetails& details,
+auto get_coarsened_wbim_graph_edges(const AdjacencyList<WBIMEdge>& graph, const WBIMCoarseningDetails& details,
                                     const VertexSet& seeds, const CoarseningParams& params)
     -> DirectedEdgeList<WBIMEdge> {
   // Edges whose target is a seed vertex are skipped since they have no influence.
@@ -886,7 +890,7 @@ struct CoarsenWIMGraphImplResult {
   WIMCoarseningDetails details;
 };
 
-auto coarsen_wim_graph_impl(AdjacencyList<WIMEdge>& graph, InvAdjacencyList<WIMEdge>& inv_graph,
+auto coarsen_wim_graph_impl(const AdjacencyList<WIMEdge>& graph, const InvAdjacencyList<WIMEdge>& inv_graph,
                             std::span<const vertex_weight_t> vertex_weights, vertex_id_t n_groups,
                             std::span<const vertex_id_t> group_id, const CoarseningParams& params)
     -> rfl::Result<CoarsenWIMGraphImplResult> {
@@ -924,12 +928,14 @@ auto coarsen_wim_graph_impl(AdjacencyList<WIMEdge>& graph, InvAdjacencyList<WIME
   });
   // Step 2: groups[].p_internal
   step_timer.do_step("assigning p_internal of groups", [&]() {
-    for (auto [u, v, w] : graph::make_edge_range<0>(graph)) {
+    for (auto u : vertices(graph)) {
       auto g = group_id[u];
-      if (g == group_id[v]) {
-        auto [ju, jv] = details.to_index_in_group(u, v);
-        details.groups[g].p_internal[ju][jv] = w.p;
-        details.groups[g].p_seed_internal[ju][jv] = w.p_seed;
+      for (auto [v, w] : graph[u]) {
+        if (g == group_id[v]) {
+          auto [ju, jv] = details.to_index_in_group(u, v);
+          details.groups[g].p_internal[ju][jv] = w.p;
+          details.groups[g].p_seed_internal[ju][jv] = w.p_seed;
+        }
       }
     }
   });
@@ -957,7 +963,7 @@ auto coarsen_wim_graph_impl(AdjacencyList<WIMEdge>& graph, InvAdjacencyList<WIME
 }
 
 template <class ResultType>
-auto coarsen_wim_graph(AdjacencyList<WIMEdge>& graph, InvAdjacencyList<WIMEdge>& inv_graph,
+auto coarsen_wim_graph(const AdjacencyList<WIMEdge>& graph, const InvAdjacencyList<WIMEdge>& inv_graph,
                        std::span<const vertex_weight_t> vertex_weights, vertex_id_t n_groups,
                        std::span<const vertex_id_t> group_id, const CoarseningParams& params)
     -> rfl::Result<ResultType> {
@@ -983,7 +989,7 @@ struct CoarsenWBIMGraphImplResult {
   WBIMCoarseningDetails details;
 };
 
-auto coarsen_wbim_graph_impl(AdjacencyList<WBIMEdge>& graph, InvAdjacencyList<WBIMEdge>& inv_graph,
+auto coarsen_wbim_graph_impl(const AdjacencyList<WBIMEdge>& graph, const InvAdjacencyList<WBIMEdge>& inv_graph,
                              std::span<const vertex_weight_t> vertex_weights, const VertexSet& seeds,
                              vertex_id_t n_groups, std::span<const vertex_id_t> group_id,
                              const CoarseningParams& params) -> rfl::Result<CoarsenWBIMGraphImplResult> {
@@ -1046,14 +1052,16 @@ auto coarsen_wbim_graph_impl(AdjacencyList<WBIMEdge>& graph, InvAdjacencyList<WB
 
   // Step 2: groups[].p_internal
   step_timer.do_step("assigning p_internal of groups", [&]() {
-    for (auto [u, v, w] : graph::make_edge_range<0>(graph)) {
+    for (auto u : vertices(graph)) {
       auto g = group_id[u];
-      if (g != group_id[v]) {
-        continue;
+      for (auto [v, w] : graph[u]) {
+        if (g != group_id[v]) {
+          continue;
+        }
+        auto [ju, jv] = details.to_index_in_group(u, v);
+        details.groups[g].p_internal[ju][jv] = w.p;
+        details.groups[g].p_boost_internal[ju][jv] = w.p_boost;
       }
-      auto [ju, jv] = details.to_index_in_group(u, v);
-      details.groups[g].p_internal[ju][jv] = w.p;
-      details.groups[g].p_boost_internal[ju][jv] = w.p_boost;
     }
   });
   // Step 3: coarsening seeds
@@ -1100,7 +1108,7 @@ auto coarsen_wbim_graph_impl(AdjacencyList<WBIMEdge>& graph, InvAdjacencyList<WB
 }
 
 template <class ResultType>
-auto coarsen_wbim_graph(AdjacencyList<WBIMEdge>& graph, InvAdjacencyList<WBIMEdge>& inv_graph,
+auto coarsen_wbim_graph(const AdjacencyList<WBIMEdge>& graph, const InvAdjacencyList<WBIMEdge>& inv_graph,
                         std::span<const vertex_weight_t> vertex_weights, const VertexSet& seeds, vertex_id_t n_groups,
                         std::span<const vertex_id_t> group_id, const CoarseningParams& params)
     -> rfl::Result<ResultType> {
@@ -1128,14 +1136,12 @@ auto coarsen_wim_graph_by_match_generic(const AdjacencyList<WIMEdge>& graph, con
   auto n = graph::num_vertices(graph);
   if (vertex_weights.empty()) {
     auto dummy_vertex_weights = std::vector<vertex_weight_t>(n, 1.0_vw);
-    return coarsen_wim_graph<ResultType>( // Uses dummy vertex weight range
-        as_non_const(graph), as_non_const(inv_graph), dummy_vertex_weights, n_groups, group_id, params);
+    return coarsen_wim_graph<ResultType>(graph, inv_graph, dummy_vertex_weights, n_groups, group_id, params);
   } else if (vertex_weights.size() != n) {
     constexpr auto msg_pattern = "Size mismatch between vertex weights (which is {}) and |V| (which is {})";
     return rfl::Error{fmt::format(msg_pattern, vertex_weights.size(), n)};
   }
-  return coarsen_wim_graph<ResultType>( //
-      as_non_const(graph), as_non_const(inv_graph), vertex_weights, n_groups, group_id, params);
+  return coarsen_wim_graph<ResultType>(graph, inv_graph, vertex_weights, n_groups, group_id, params);
 }
 
 template <class ResultType>
@@ -1151,14 +1157,12 @@ auto coarsen_wbim_graph_by_match_generic(const AdjacencyList<WBIMEdge>& graph,
   }
   if (vertex_weights.empty()) {
     auto dummy_vertex_weights = std::vector<vertex_weight_t>(n, 1.0_vw);
-    return coarsen_wbim_graph<ResultType>( // Uses dummy vertex weight range
-        as_non_const(graph), as_non_const(inv_graph), dummy_vertex_weights, seeds, n_groups, group_id, params);
+    return coarsen_wbim_graph<ResultType>(graph, inv_graph, dummy_vertex_weights, seeds, n_groups, group_id, params);
   } else if (vertex_weights.size() != n) {
     constexpr auto msg_pattern = "Size mismatch between vertex weights (which is {}) and |V| (which is {})";
     return rfl::Error{fmt::format(msg_pattern, vertex_weights.size(), n)};
   }
-  return coarsen_wbim_graph<ResultType>( //
-      as_non_const(graph), as_non_const(inv_graph), vertex_weights, seeds, n_groups, group_id, params);
+  return coarsen_wbim_graph<ResultType>(graph, inv_graph, vertex_weights, seeds, n_groups, group_id, params);
 }
 
 template <class ResultType>

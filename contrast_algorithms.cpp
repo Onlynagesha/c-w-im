@@ -1,7 +1,6 @@
 #include "contrast_algorithms.h"
 #include "utils/easylog.h"
 #include <fmt/ranges.h>
-#include <nwgraph/adaptors/edge_range.hpp>
 
 namespace {
 template <is_edge_property E, int IsInv>
@@ -14,23 +13,23 @@ auto max_out_degree_generic(const graph::adjacency<IsInv, E>& graph, vertex_id_t
     top_k = std::min(top_k, n);
   }
   auto out_degrees = [&]() {
+    auto res = std::vector<edge_probability_t>(n, 0.0_ep);
     if constexpr (IsInv == 0) {
       // Traverses out-edges for each vertex v
-      if (uses_edge_weight) {
-        auto view = graph | TRANSFORM_VIEW(accumulate_sum(_1 | TRANSFORM_VIEW(get<1>(_1).p)));
-        return std::vector(view.begin(), view.end());
-      } else {
-        auto view = graph | TRANSFORM_VIEW(static_cast<edge_probability_t>(ranges::size(_1)));
-        return std::vector(view.begin(), view.end());
+      for (auto source : vertices(graph)) {
+        for (auto [target, w] : graph[source]) {
+          res[source] += (uses_edge_weight ? w.p : 1.0_ep);
+        }
       }
     } else {
       // Otherwise, traverses each in-edge in the transpose graph
-      auto res = std::vector<edge_probability_t>(n);
-      for (auto [target, source, w] : graph::make_edge_range<0>(as_non_const(graph))) {
-        res[source] += (uses_edge_weight ? w.p : 1.0_ep);
+      for (auto target : vertices(graph)) {
+        for (auto [source, w] : graph[target]) {
+          res[source] += (uses_edge_weight ? w.p : 1.0_ep);
+        }
       }
-      return res;
     }
+    return res;
   }();
   auto indices = std::vector<vertex_id_t>(n);
   std::iota(indices.begin(), indices.end(), 0);
@@ -89,18 +88,17 @@ auto pagerank_generic(const AdjacencyList<E>& graph, const InvAdjacencyList<E>& 
   }();
   auto res_l2_norm = vector_l2_norm(res);
   MYLOG_FMT_TRACE("PR(0) = {::.4f}, with L2-norm = {:.4f}", res, res_l2_norm);
-  // L(v) = (weighted) out-degree of v of transpose == false, or in-degree of v if transpose == true
+  // L(v) = Sum of (v -> u).p (if weighted) for each out-neighbor u if transpose == false
+  // L(v) = Sum of (x -> v).p (if weighted) for each in-neighbor x if transpose == true
   auto total_d = [&]() {
-    auto get_fn = [&params](const auto& which_graph) {
-      if (params.uses_edge_weight) {
-        // L(v) = Sum of (v -> u).p for each out-neighbor u if transpose == false
-        // L(v) = Sum of (x -> v).p for each in-neighbor x if transpose == true
-        auto view = which_graph | TRANSFORM_VIEW(accumulate_sum(_1 | TRANSFORM_VIEW(get<1>(_1).p)));
-        return std::vector(view.begin(), view.end());
+    auto get_fn = [&params, n](const auto& which_graph) {
+      auto res = std::vector<edge_probability_t>(n, 0.0_ep);
+      for (auto u : vertices(which_graph)) {
+        for (auto [v, w] : which_graph[u]) {
+          res[u] += (params.uses_edge_weight ? w.p : 1.0_ep);
+        }
       }
-      // Otherwise, L(v) = out-degree(v) if transpose == false), or in-degree(v) if transpose == true
-      auto unweighted_view = which_graph | TRANSFORM_VIEW(static_cast<edge_probability_t>(ranges::size(_1)));
-      return std::vector(unweighted_view.begin(), unweighted_view.end());
+      return res;
     };
     return params.transpose ? get_fn(inv_graph) : get_fn(graph);
   }();

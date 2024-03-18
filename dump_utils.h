@@ -3,7 +3,6 @@
 #include "graph_types.h"
 #include "utils/utils.h"
 #include <fmt/format.h>
-#include <nwgraph/adaptors/edge_range.hpp>
 
 namespace dump_utils {
 template <ranges::forward_range Range, class ToStringFn>
@@ -144,10 +143,11 @@ inline auto merge_dumped_components(ComponentRange&& components, int indent, int
 template <class Property, int IsInv>
   requires(fmt::is_formattable<Property>::value)
 inline auto dump_graph(const graph::adjacency<IsInv, Property>& graph, int indent, int level) -> std::string {
-  auto edge_range = graph::make_edge_range<0>(as_non_const(graph));
   auto components = make_reserved_vector<std::string>(graph.num_edges());
-  for (auto [u, v, w] : edge_range) {
-    components.push_back(fmt::format("({}, {}): {}", u, v, w));
+  for (auto u : vertices(graph)) {
+    for (auto [v, w] : graph[u]) {
+      components.push_back(fmt::format("({}, {}): {}", u, v, w));
+    }
   }
   return merge_dumped_components(components, indent, level);
 }
