@@ -7,14 +7,16 @@
 #include "utils/utils.h"
 #include <fmt/format.h>
 
-#define DUMP_REGISTERED_TYPES_AUTO_GENERATED(F)         \
-  F(WIMEdge)                       /* graph_types.h */  \
-  F(WBIMEdge)                      /* graph_types.h */  \
-  F(ReadGraphParams)               /* read_dataset.h */ \
-  F(CoarseningParams)              /* coarsening.h */   \
-  F(WIMExperimentParams)           /* experiments.h */  \
-  F(WIMCoarseningExperimentParams) /* experiments.h */  \
-  F(WIMContrastExperimentParams)   /* experiments.h */
+#define DUMP_REGISTERED_TYPES_AUTO_GENERATED(F)          \
+  F(WIMEdge)                        /* graph_types.h */  \
+  F(WBIMEdge)                       /* graph_types.h */  \
+  F(ReadGraphParams)                /* read_dataset.h */ \
+  F(CoarseningParams)               /* coarsening.h */   \
+  F(WIMSketchingExperimentParams)   /* experiments.h */  \
+  F(WBIMSketchingExperimentParams)  /* experiments.h */  \
+  F(WIMCoarseningExperimentParams)  /* experiments.h */  \
+  F(WBIMCoarseningExperimentParams) /* experiments.h */  \
+  F(WIMContrastExperimentParams)    /* experiments.h */
 
 #define REGISTER_AUTO_GENERATED_DUMP_FUNCTIONS_WITH_JSON(Type)          \
   auto dump(const Type& value, int indent = 0) noexcept -> std::string; \

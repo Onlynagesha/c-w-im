@@ -37,7 +37,10 @@ set(COMMON_COMPILE_DEFINITIONS
     BOOST_ENABLE_ASSERT_DEBUG_HANDLER)
 # Enables assertion for GCC libstdc++
 if (CMAKE_BUILD_TYPE AND (CMAKE_BUILD_TYPE STREQUAL "Debug"))
-    list(APPEND COMMON_COMPILE_DEFINITIONS _GLIBCXX_ASSERTIONS)
+    list(APPEND COMMON_COMPILE_DEFINITIONS 
+        _GLIBCXX_ASSERTIONS
+        ENABLES_MYLOG_TRACE 
+        DEBUG_FIXED_RANDOM_SEED)
 endif ()
 
 set(COMMON_COMPILE_OPTIONS)
@@ -50,24 +53,28 @@ endif ()
 # ---- Components ----
 
 set(COMPONENT_OBJECTS
+    yyjson-components
     io-components
     experiment-components)
 
-add_library(io-components OBJECT
-    third_party/reflect_cpp/src/yyjson.c
-    argparse.cpp
-    dump.cpp
-    graph_types.cpp # Graph IO
-    )
+add_library(yyjson-components OBJECT
+    third_party/reflect_cpp/src/yyjson.c)
 
-add_library(experiment-components OBJECT
-    experiments.cpp
+add_library(io-components OBJECT
+    argparse.cpp # Requires yyjson components
+    dump.cpp
+    graph_types.cpp)
+target_link_libraries(io-components PRIVATE yyjson-components)
+
+add_library(experiment-components OBJECT 
+    experiments.cpp 
+    experiments_internal_states.cpp # Requires yyjson components
     coarsening.cpp
     coarsening_dump.cpp
     contrast_algorithms.cpp
     wim.cpp
-    wim_dump.cpp
-)
+    wim_dump.cpp)
+target_link_libraries(experiment-components PRIVATE yyjson-components)
 
 # ---- Executables ----
 
@@ -86,7 +93,7 @@ add_executable(wim-contrast-experiment
     main_wim_contrast_experiment.cpp)
 
 foreach (target ${EXPERIMENT_EXECUTABLES})
-    target_link_libraries(${target} PRIVATE io-components experiment-components)
+    target_link_libraries(${target} PRIVATE yyjson-components io-components experiment-components)
 endforeach()
 
 add_executable(create-dataset
@@ -98,36 +105,23 @@ add_executable(to-matrix-market
     to_matrix_market.cpp)
 
 foreach (target create-dataset to-matrix-market)
-    target_link_libraries(${target} PRIVATE io-components)
+    target_link_libraries(${target} PRIVATE yyjson-components io-components)
 endforeach()
 
 add_executable(test-wim-coarsening
-    playground/test_wim_coarsening.cpp
-    coarsening.cpp
-    coarsening_dump.cpp
-    wim.cpp
-    wim_dump.cpp)
+    playground/test_wim_coarsening.cpp)
 
 add_executable(test-wbim-coarsening
-    playground/test_wbim_coarsening.cpp
-    coarsening.cpp
-    coarsening_dump.cpp
-    wim.cpp
-    wim_dump.cpp)
+    playground/test_wbim_coarsening.cpp)
 
 add_executable(test-ranking-algorithms
-    playground/test_ranking_algorithms.cpp
-    contrast_algorithms.cpp)
+    playground/test_ranking_algorithms.cpp)
 
 add_executable(test-seed-detection
-    playground/test_seed_detection.cpp
-    wim.cpp
-    wim_dump.cpp)
+    playground/test_seed_detection.cpp)
 
 add_executable(test-prr-sketching
-    playground/test_prr_sketching.cpp
-    wim.cpp
-    wim_dump.cpp)
+    playground/test_prr_sketching.cpp)
 
 SET(PLAYGROUND_TESTS 
     test-wim-coarsening 
@@ -137,8 +131,7 @@ SET(PLAYGROUND_TESTS
     test-prr-sketching)
 
 foreach (target ${PLAYGROUND_TESTS})
-    target_link_libraries(${target} PRIVATE io-components)
-    target_compile_definitions(${target} PRIVATE ENABLES_MYLOG_TRACE DEBUG_FIXED_RANDOM_SEED)
+    target_link_libraries(${target} PRIVATE yyjson-components io-components experiment-components)
 endforeach()
 
 foreach(target ${COMPONENT_OBJECTS}

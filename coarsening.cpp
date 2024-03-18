@@ -1462,8 +1462,8 @@ auto mongoose_match_s(const AdjacencyList<edge_probability_t>& graph, std::span<
       adopt[v_pivot] = u_last;
     }
   }
-  MYLOG_TRACE("Step 2 done: Brotherly matching & Adoptive matching.\n{}\n{}", //
-              DUMP_INDEX_ARRAY(match), DUMP_INDEX_ARRAY(adopt));
+  MYLOG_FMT_TRACE("Step 2 done: Brotherly matching & Adoptive matching.\n{}\n{}", //
+                  DUMP_INDEX_ARRAY(match), DUMP_INDEX_ARRAY(adopt));
 
   // Step 3: Groups by matching result
   auto res = MongooseMatchResult{.n_groups = 0, .group_id = std::vector<vertex_id_t>(n, -1)};

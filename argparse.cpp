@@ -33,20 +33,57 @@ auto read_arguments_from_config_file(ArgumentParser& parser, T& value) {
   }
 }
 
-template <class T>
+struct CheckListArguments {
+  bool non_empty_required = false;
+  bool uniqueness_required = false;
+  bool positive_values_required = false;
+};
+
+template <CheckListArguments Config, class T>
 auto sort_and_check_list(std::string_view name, std::span<T> values) -> std::optional<std::string> {
   if (values.empty()) {
-    return fmt::format("{} can not be an empty list.", name);
+    if constexpr (Config.non_empty_required) {
+      return fmt::format("'{}' can not be an empty list.", name);
+    } else {
+      return std::nullopt; // OK, no error message
+    }
   }
   ranges::sort(values);
-  if (auto n0 = values.front(); n0 <= 0) {
-    return fmt::format("{} must be positive integers, while {} is given.", name, n0);
+  if constexpr (Config.positive_values_required) {
+    if (auto n0 = values.front(); n0 <= 0) {
+      return fmt::format("Elements in '{}' must be positive, while {} is given.", name, n0);
+    }
   }
-  constexpr auto adjacent_equal_filter = views::filter(LAMBDA_1(get<0>(_1) == get<1>(_1)));
-  for (auto [n0, n1] : views::adjacent<2>(values) | adjacent_equal_filter) {
-    return fmt::format("Duplicated {} (detected {}) is disallowed.", name, n0);
+  if constexpr (Config.uniqueness_required) {
+    constexpr auto adjacent_equal_filter = views::filter(LAMBDA_1(get<0>(_1) == get<1>(_1)));
+    for (auto [n0, n1] : views::adjacent<2>(values) | adjacent_equal_filter) {
+      return fmt::format("Duplicated elements in '{}' (detected {}) is disallowed.", name, n0);
+    }
   }
-  return std::nullopt;
+  return std::nullopt; // OK, no error
+}
+
+template <class SketchingParams>
+auto sort_and_check_sketching_params(SketchingParams& sketching) -> std::optional<std::string> {
+  constexpr auto requirements = CheckListArguments{
+      .non_empty_required = true,
+      .uniqueness_required = true,
+      .positive_values_required = true,
+  };
+  auto n_sketches = std::span{sketching.n_sketches};
+  return sort_and_check_list<requirements>("# of RR-sketches", n_sketches).or_else([&]() {
+    if constexpr (std::is_same_v<SketchingParams, WIMSketchingParams>) {
+      // n_seeds for WIM
+      auto n_seeds = std::span{sketching.n_seeds};
+      return sort_and_check_list<requirements>("# of seed vertices", n_seeds);
+    } else if constexpr (std::is_same_v<SketchingParams, WBIMSketchingParams>) {
+      // n_boosted for WBIM
+      auto n_boosted = std::span{sketching.n_boosted};
+      return sort_and_check_list<requirements>("# of boosted vertices", n_boosted);
+    } else {
+      static_assert(rfl::always_false_v<SketchingParams>, "Invalid sketching params type.");
+    }
+  });
 }
 } // namespace
 
@@ -81,15 +118,16 @@ auto ToMatrixMarketParams::parse_from_args(int argc, char** argv) noexcept -> rf
       });
 }
 
-auto WIMExperimentParams::parse_from_args(int argc, char** argv) noexcept -> rfl::Result<WIMExperimentParams> {
-  return parse_from_args_generic<WIMExperimentParams>(
+template <class SketchingParams>
+auto SketchingExperimentParams<SketchingParams>::parse_from_args(int argc, char** argv) noexcept
+    -> rfl::Result<SketchingExperimentParams<SketchingParams>> {
+  using ResultType = SketchingExperimentParams<SketchingParams>;
+  return parse_from_args_generic<ResultType>(
              argc, argv, // Appends --config etc.
              manual_add_config_arguments<ManualConfigArguments{.has_config = true, .requires_input_file = true}>,
-             read_arguments_from_config_file<WIMExperimentParams>)
-      .and_then([](WIMExperimentParams params) -> rfl::Result<WIMExperimentParams> {
-        auto err_msg =
-            sort_and_check_list("# of RR-sketches", std::span{params.wim->n_sketches})
-                .or_else(LAMBDA_0(sort_and_check_list("# of seed vertices", std::span{params.wim->n_seeds})));
+             read_arguments_from_config_file<ResultType>)
+      .and_then([](ResultType params) -> rfl::Result<ResultType> {
+        auto err_msg = sort_and_check_sketching_params(*params.sketching);
         if (err_msg) {
           return rfl::Error{std::move(*err_msg)};
         }
@@ -97,22 +135,42 @@ auto WIMExperimentParams::parse_from_args(int argc, char** argv) noexcept -> rfl
       });
 }
 
-auto WIMCoarseningExperimentParams::parse_from_args(int argc, char** argv) noexcept
-    -> rfl::Result<WIMCoarseningExperimentParams> {
-  return parse_from_args_generic<WIMCoarseningExperimentParams>(
+namespace {
+// Triggers template instantiation
+auto parse_wim_sketching_experiment_params(int argc, char** argv) noexcept {
+  return WIMSketchingExperimentParams::parse_from_args(argc, argv);
+}
+auto parse_wbim_sketching_experiment_params(int argc, char** argv) noexcept {
+  return WBIMSketchingExperimentParams::parse_from_args(argc, argv);
+}
+} // namespace
+
+template <class SketchingParams>
+auto CoarseningExperimentParams<SketchingParams>::parse_from_args(int argc, char** argv) noexcept
+    -> rfl::Result<CoarseningExperimentParams<SketchingParams>> {
+  using ResultType = CoarseningExperimentParams<SketchingParams>;
+  return parse_from_args_generic<ResultType>(
              argc, argv, // Appends --config etc.
              manual_add_config_arguments<ManualConfigArguments{.has_config = true, .requires_input_file = true}>,
-             read_arguments_from_config_file<WIMCoarseningExperimentParams>)
-      .and_then([](WIMCoarseningExperimentParams params) -> rfl::Result<WIMCoarseningExperimentParams> {
-        auto err_msg =
-            sort_and_check_list("# of RR-sketches", std::span{params.wim->n_sketches})
-                .or_else(LAMBDA_0(sort_and_check_list("# of seed vertices", std::span{params.wim->n_seeds})));
+             read_arguments_from_config_file<ResultType>)
+      .and_then([](ResultType params) -> rfl::Result<ResultType> {
+        auto err_msg = sort_and_check_sketching_params(*params.sketching);
         if (err_msg) {
           return rfl::Error{std::move(*err_msg)};
         }
         return std::move(params);
       });
 }
+
+namespace {
+// Triggers template instantiation
+auto parse_wim_coarsening_experiment_params(int argc, char** argv) noexcept {
+  return WIMCoarseningExperimentParams::parse_from_args(argc, argv);
+}
+auto parse_wbim_coarsening_experiment_params(int argc, char** argv) noexcept {
+  return WBIMCoarseningExperimentParams::parse_from_args(argc, argv);
+}
+} // namespace
 
 auto WIMContrastExperimentParams::parse_from_args(int argc, char** argv) noexcept
     -> rfl::Result<WIMContrastExperimentParams> {
@@ -121,11 +179,18 @@ auto WIMContrastExperimentParams::parse_from_args(int argc, char** argv) noexcep
              manual_add_config_arguments<ManualConfigArguments{.has_config = true, .requires_input_file = true}>,
              read_arguments_from_config_file<WIMContrastExperimentParams>)
       .and_then([](WIMContrastExperimentParams params) -> rfl::Result<WIMContrastExperimentParams> {
-        if (auto err_msg = sort_and_check_list("# of seed vertices", std::span{params.n_seeds}); err_msg) {
+        constexpr auto requirements = CheckListArguments{
+            .non_empty_required = true,
+            .uniqueness_required = true,
+            .positive_values_required = true,
+        };
+        auto n_seeds = std::span{params.n_seeds};
+        if (auto err_msg = sort_and_check_list<requirements>("# of seed vertices", n_seeds); err_msg) {
           return rfl::Error{std::move(*err_msg)};
         }
         if (params.with_rr_sketch) {
-          if (auto err_msg = sort_and_check_list("# of RR-sketches", std::span{params.n_sketches}); err_msg) {
+          auto n_sketches = std::span{params.n_sketches};
+          if (auto err_msg = sort_and_check_list<requirements>("# of RR-sketches", n_sketches); err_msg) {
             return rfl::Error{std::move(*err_msg)};
           }
         }

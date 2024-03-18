@@ -134,9 +134,20 @@ auto coarsen_wbim_graph(const AdjacencyList<WBIMEdge>& graph, const InvAdjacency
                         std::span<const vertex_weight_t> vertex_weights, const VertexSet& seeds,
                         const CoarseningParams& params) noexcept -> rfl::Result<WBIMCoarsenGraphBriefResult>;
 
+inline auto coarsen_wbim_graph_p(const WBIMAdjacencyListPair& graph, const VertexSet& seeds,
+                                 const CoarseningParams& params) noexcept -> rfl::Result<WBIMCoarsenGraphBriefResult> {
+  return coarsen_wbim_graph(graph.adj_list, graph.inv_adj_list, graph.vertex_weights, seeds, params);
+}
+
 auto coarsen_wbim_graph_d(const AdjacencyList<WBIMEdge>& graph, const InvAdjacencyList<WBIMEdge>& inv_graph,
                           std::span<const vertex_weight_t> vertex_weights, const VertexSet& seeds,
                           const CoarseningParams& params) noexcept -> rfl::Result<WBIMCoarsenGraphDetailedResult>;
+
+inline auto coarsen_wbim_graph_d_p(const WBIMAdjacencyListPair& graph, const VertexSet& seeds,
+                                   const CoarseningParams& params) noexcept
+    -> rfl::Result<WBIMCoarsenGraphDetailedResult> {
+  return coarsen_wbim_graph_d(graph.adj_list, graph.inv_adj_list, graph.vertex_weights, seeds, params);
+}
 
 // ---- Step 4: Expanding seeds ----
 
@@ -166,15 +177,39 @@ auto expand_wim_seed_vertices(const AdjacencyList<WIMEdge>& graph, std::span<con
                               std::span<const vertex_id_t> coarsened_seeds, const ExpandingParams& params) noexcept
     -> rfl::Result<ExpandSeedResult>;
 
+inline auto further_expand_wim_seed_vertices(const WIMCoarsenGraphBriefResult& last_result,
+                                             const WIMCoarsenGraphBriefResult& cur_result,
+                                             std::span<const vertex_id_t> coarsened_seeds,
+                                             const ExpandingParams& params) -> rfl::Result<ExpandSeedResult> {
+  return expand_wim_seed_vertices(last_result.coarsened.adj_list, last_result.coarsened.vertex_weights, //
+                                  cur_result, coarsened_seeds, params);
+}
+
 auto expand_wim_seed_vertices_d(const AdjacencyList<WIMEdge>& graph, std::span<const vertex_weight_t> vertex_weights,
                                 const WIMCoarsenGraphDetailedResult& coarsening_result,
                                 std::span<const vertex_id_t> coarsened_seeds, const ExpandingParams& params) noexcept
     -> rfl::Result<ExpandSeedResult>;
 
+inline auto further_expand_wim_seed_vertices_d(const WIMCoarsenGraphDetailedResult& last_result,
+                                               const WIMCoarsenGraphDetailedResult& cur_result,
+                                               std::span<const vertex_id_t> coarsened_seeds,
+                                               const ExpandingParams& params) -> rfl::Result<ExpandSeedResult> {
+  return expand_wim_seed_vertices_d(last_result.coarsened.adj_list, last_result.coarsened.vertex_weights, //
+                                    cur_result, coarsened_seeds, params);
+}
+
 auto expand_wbim_boosted_vertices(const AdjacencyList<WBIMEdge>& graph, std::span<const vertex_weight_t> vertex_weights,
                                   const WBIMCoarsenGraphBriefResult& coarsening_result,
                                   std::span<const vertex_id_t> coarsened_boosted,
                                   const ExpandingParams& params) noexcept -> rfl::Result<ExpandBoostedResult>;
+
+inline auto further_expand_wbim_boosted_vertices(const WBIMCoarsenGraphBriefResult& last_result,
+                                                 const WBIMCoarsenGraphBriefResult& cur_result,
+                                                 std::span<const vertex_id_t> coarsened_boosted,
+                                                 const ExpandingParams& params) -> rfl::Result<ExpandBoostedResult> {
+  return expand_wbim_boosted_vertices(last_result.coarsened.adj_list, last_result.coarsened.vertex_weights, //
+                                      cur_result, coarsened_boosted, params);
+}
 
 auto expand_wbim_boosted_vertices_d(const AdjacencyList<WBIMEdge>& graph,
                                     std::span<const vertex_weight_t> vertex_weights,
@@ -182,18 +217,10 @@ auto expand_wbim_boosted_vertices_d(const AdjacencyList<WBIMEdge>& graph,
                                     std::span<const vertex_id_t> coarsened_boosted,
                                     const ExpandingParams& params) noexcept -> rfl::Result<ExpandBoostedResult>;
 
-inline auto further_expand_wim_seed_vertices(const WIMCoarsenGraphBriefResult& last_result,
-                                             const WIMCoarsenGraphBriefResult& cur_result,
-                                             std::span<const vertex_id_t> coarsened_seeds,
-                                             const ExpandingParams& params) -> rfl::Result<ExpandSeedResult> {
-  return expand_wim_seed_vertices( //
-      last_result.coarsened.adj_list, last_result.coarsened.vertex_weights, cur_result, coarsened_seeds, params);
-}
-
-inline auto further_expand_wim_seed_vertices_d(const WIMCoarsenGraphDetailedResult& last_result,
-                                               const WIMCoarsenGraphDetailedResult& cur_result,
-                                               std::span<const vertex_id_t> coarsened_seeds,
-                                               const ExpandingParams& params) -> rfl::Result<ExpandSeedResult> {
-  return expand_wim_seed_vertices_d( //
-      last_result.coarsened.adj_list, last_result.coarsened.vertex_weights, cur_result, coarsened_seeds, params);
+inline auto further_expand_wbim_boosted_vertices_d(const WBIMCoarsenGraphDetailedResult& last_result,
+                                                   const WBIMCoarsenGraphDetailedResult& cur_result,
+                                                   std::span<const vertex_id_t> coarsened_boosted,
+                                                   const ExpandingParams& params) -> rfl::Result<ExpandBoostedResult> {
+  return expand_wbim_boosted_vertices_d(last_result.coarsened.adj_list, last_result.coarsened.vertex_weights, //
+                                        cur_result, coarsened_boosted, params);
 }

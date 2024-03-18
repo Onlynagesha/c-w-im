@@ -9,13 +9,22 @@
 
 // These parameters are expected to be "inherited" with rfl::Flatten
 struct CommonExperimentParams {
-  std::string input_file; // Input file of graph data
+  // Input file of graph data
+  std::string input_file;
+  // Output file of log.
   std::string log_output_file;
+  // Output file of JSON which contains the experiment results.
   std::string json_output_file;
+  // Log level, DEBUG or INFO recommended.
   easylog::Severity log_severity = easylog::Severity::DEBUG;
+  // Whether or not to output log message to stdout.
   bool log_console = false;
+  // Width of histograms during data distribution display.
   size_t histogram_width = 100;
+  // Height of histograms during data distribution display.
   size_t histogram_height = 20;
+  // # of Monte-carlo trials during simulation to estimate the objective function F(S) or F(B;S)
+  rfl::Validator<uint64_t, rfl::Minimum<1>> simulation_try_count = 10'000;
 
   auto histogram_shape() const -> HistogramShape {
     return {.display_width = histogram_width, .display_height = histogram_height};
@@ -23,50 +32,63 @@ struct CommonExperimentParams {
 };
 
 // These parameters are expected to be "inherited" with rfl::Flatten
-struct WIMParams {
+struct WIMSketchingParams {
   std::vector<size_t> n_sketches;
   std::vector<vertex_id_t> n_seeds;
-  rfl::Validator<uint64_t, rfl::Minimum<1>> simulation_try_count = 10'000;
 };
 
-struct WIMExperimentParams {
-  rfl::Flatten<CommonExperimentParams> common;
-  rfl::Flatten<WIMParams> wim;
-
-  static auto parse_from_args(int argc, char** argv) noexcept -> rfl::Result<WIMExperimentParams>;
+struct WBIMSketchingParams {
+  std::vector<size_t> n_sketches;
+  std::vector<vertex_id_t> n_boosted;
 };
 
-struct WIMCoarseningExperimentParams {
+template <class SketchingParams>
+struct SketchingExperimentParams {
   rfl::Flatten<CommonExperimentParams> common;
-  rfl::Flatten<WIMParams> wim;
+  rfl::Flatten<SketchingParams> sketching;
+
+  static auto parse_from_args(int argc, char** argv) noexcept
+      -> rfl::Result<SketchingExperimentParams<SketchingParams>>;
+};
+
+using WIMSketchingExperimentParams = SketchingExperimentParams<WIMSketchingParams>;
+using WBIMSketchingExperimentParams = SketchingExperimentParams<WBIMSketchingParams>;
+
+struct MultiLevelParams {
   rfl::Flatten<CoarseningParams> coarsening;
   rfl::Flatten<ExpandingParams> expanding;
   // Coarsening stops when |V| <= coarsening_threshold
   rfl::Validator<vertex_id_t, rfl::Minimum<1>> coarsening_threshold = 1'000;
-  // S_LOCAL (which is the fastest) is forced as expanding policy at the first F levels
-  // with F = n_fast_expanding_levels
+  // LOCAL (which is the fastest) is the forced expanding policy at the first F levels
+  // where F = n_fast_expanding_levels, since other policies are usually time-consuming.
   rfl::Validator<vertex_id_t, rfl::Minimum<0>> n_fast_expanding_levels = 0;
-
-  static auto parse_from_args(int argc, char** argv) noexcept -> rfl::Result<WIMCoarseningExperimentParams>;
 };
+
+template <class SketchingParams>
+struct CoarseningExperimentParams {
+  rfl::Flatten<CommonExperimentParams> common;
+  rfl::Flatten<SketchingParams> sketching;
+  rfl::Flatten<MultiLevelParams> multi_level;
+
+  static auto parse_from_args(int argc, char** argv) noexcept
+      -> rfl::Result<CoarseningExperimentParams<SketchingParams>>;
+};
+
+using WIMCoarseningExperimentParams = CoarseningExperimentParams<WIMSketchingParams>;
+using WBIMCoarseningExperimentParams = CoarseningExperimentParams<WBIMSketchingParams>;
 
 struct WIMContrastExperimentParams {
   bool with_max_degree = false;
   bool with_max_strength = false;
   bool with_imrank = false;
-  bool with_pagerank = false;           // Minimum Pagerank
-  bool with_pagerank_transpose = false; // Maximum Pagerank of the transpose graph
+  bool with_pagerank = false;
   bool with_rr_sketch = false;
 
   rfl::Flatten<CommonExperimentParams> common;
   std::vector<vertex_id_t> n_seeds;
-  rfl::Validator<uint64_t, rfl::Minimum<1>> simulation_try_count = 10'000;
   // For coarsening
   vertex_id_t coarsening_level = 0;
-  vertex_id_t coarsening_threshold = 1'000;
-  rfl::Validator<vertex_id_t, rfl::Minimum<0>> n_fast_expanding_levels = 0;
-  rfl::Flatten<CoarseningParams> coarsening;
-  rfl::Flatten<ExpandingParams> expanding;
+  rfl::Flatten<MultiLevelParams> multi_level;
   // For RR-sketching only
   std::vector<size_t> n_sketches;
   // For Pagerank only
@@ -81,6 +103,8 @@ struct WIMContrastExperimentParams {
 };
 
 auto wim_experiment(int argc, char** argv) noexcept -> ResultVoid;
+
+auto wbim_experiment(int argc, char** argv) noexcept -> ResultVoid;
 
 auto wim_coarsening_experiment(int argc, char** argv) noexcept -> ResultVoid;
 

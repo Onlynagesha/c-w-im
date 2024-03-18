@@ -47,8 +47,8 @@ template <same_as_either<double, std::vector<double>> ReturnType, //
           is_edge_property E,                                     //
           same_as_either<VertexSet, std::nullptr_t> BoostedSet,   //
           random_access_range_of_exactly<vertex_weight_t> VertexWeights>
-auto wim_simulate_generic(const AdjacencyList<E>& graph, const VertexSet& seeds, const BoostedSet& boosted_vertices,
-                          VertexWeights vertex_weights, uint64_t try_count) -> rfl::Result<ReturnType> {
+auto simulate_generic(const AdjacencyList<E>& graph, const VertexSet& seeds, const BoostedSet& boosted_vertices,
+                      VertexWeights vertex_weights, uint64_t try_count) -> rfl::Result<ReturnType> {
   if (try_count <= 0) {
     return rfl::Error{"Try count of simulation must be a positive integer."};
   }
@@ -605,6 +605,7 @@ auto PRRSketchSet::append_single(vertex_id_t center, vertex_id_t k, void* cache_
 auto PRRSketchSet::append(size_t n_sketches, vertex_id_t k) noexcept -> void {
   auto cache_obj = PRRSketchCache{};
   for (auto success_count = 0zu; success_count < n_sketches;) {
+    total_n_attempts += 1;
     auto center = center_distribution(rand_engine);
     if (append_single(center, k, &cache_obj)) {
       MYLOG_FMT_TRACE("PRR-Sketch #{}: Picks vertex #{} as center.", success_count, center);
@@ -679,7 +680,7 @@ auto wim_simulate(const AdjacencyList<WIMEdge>& graph, const VertexSet& seeds, u
   if (seeds.size() == 0) {
     return 0.0;
   }
-  return wim_simulate_generic<double>(graph, seeds, nullptr, views::repeat(1.0_vw), try_count);
+  return simulate_generic<double>(graph, seeds, nullptr, views::repeat(1.0_vw), try_count);
 }
 
 auto wim_simulate_w(const AdjacencyList<WIMEdge>& graph, std::span<const vertex_weight_t> vertex_weights,
@@ -687,13 +688,13 @@ auto wim_simulate_w(const AdjacencyList<WIMEdge>& graph, std::span<const vertex_
   if (vertex_weights.empty()) {
     return wim_simulate(graph, seeds, try_count);
   }
-  return wim_simulate_generic<double>(graph, seeds, nullptr, vertex_weights, try_count);
+  return simulate_generic<double>(graph, seeds, nullptr, vertex_weights, try_count);
 }
 
 auto wbim_simulate(const AdjacencyList<WBIMEdge>& graph, const VertexSet& seeds, const VertexSet& boosted_vertices,
                    uint64_t try_count) noexcept -> rfl::Result<double> {
   auto vertex_weights = views::repeat(1.0_vw);
-  return wim_simulate_generic<double>(graph, seeds, boosted_vertices, vertex_weights, try_count);
+  return simulate_generic<double>(graph, seeds, boosted_vertices, vertex_weights, try_count);
 }
 
 auto wbim_simulate_w(const AdjacencyList<WBIMEdge>& graph, std::span<const vertex_weight_t> vertex_weights,
@@ -702,17 +703,17 @@ auto wbim_simulate_w(const AdjacencyList<WBIMEdge>& graph, std::span<const verte
   if (vertex_weights.empty()) {
     return wbim_simulate(graph, seeds, boosted_vertices, try_count);
   }
-  return wim_simulate_generic<double>(graph, seeds, boosted_vertices, vertex_weights, try_count);
+  return simulate_generic<double>(graph, seeds, boosted_vertices, vertex_weights, try_count);
 }
 
 auto wim_simulate_p(const AdjacencyList<WIMEdge>& graph, const VertexSet& seeds, uint64_t try_count)
     -> rfl::Result<std::vector<double>> {
-  return wim_simulate_generic<std::vector<double>>(graph, seeds, nullptr, views::repeat(1.0_vw), try_count);
+  return simulate_generic<std::vector<double>>(graph, seeds, nullptr, views::repeat(1.0_vw), try_count);
 }
 
 auto wbim_simulate_p(const AdjacencyList<WBIMEdge>& graph, const VertexSet& seeds, const VertexSet& boosted_vertices,
                      uint64_t try_count) -> rfl::Result<std::vector<double>> {
-  return wim_simulate_generic<std::vector<double>>(graph, seeds, boosted_vertices, views::repeat(1.0_vw), try_count);
+  return simulate_generic<std::vector<double>>(graph, seeds, boosted_vertices, views::repeat(1.0_vw), try_count);
 }
 
 auto wbim_activation_probability_from_seeds(const InvAdjacencyList<WBIMEdge>& inv_graph, const VertexSet& seeds,

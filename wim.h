@@ -135,11 +135,14 @@ struct PRRSketchSet {
   std::vector<PRRSketch> sketches;
   // For each i in inv_critical[v], v is a critical vertex in the i-th PRR-sketch
   std::vector<std::vector<size_t>> inv_critical;
+  // # of sketching attempts (success + failure)
+  uint64_t total_n_attempts;
 
   PRRSketchSet(const AdjacencyList<WBIMEdge>* graph, const InvAdjacencyList<WBIMEdge>* inv_graph,
                std::span<const vertex_weight_t> vertex_weights, const VertexSet* seeds)
       : graph(graph), inv_graph(inv_graph), seeds(seeds),
-        center_distribution(vertex_weights.begin(), vertex_weights.end()), sketches(), inv_critical() {
+        center_distribution(vertex_weights.begin(), vertex_weights.end()), //
+        sketches(), inv_critical(), total_n_attempts(0) {
     auto [n, m] = graph_n_m(*graph);
     auto [ni, mi] = graph_n_m(*inv_graph);
     BOOST_ASSERT_MSG(n == ni && m == mi, //
@@ -158,6 +161,20 @@ struct PRRSketchSet {
 
   auto n_sketches() const -> size_t {
     return sketches.size();
+  }
+
+  auto sketch_sizes() const {
+    return sketches | TRANSFORM_VIEW(graph::num_vertices(_1.mapped_graph));
+  }
+
+  auto average_sketch_size() const -> double {
+    BOOST_ASSERT_MSG(!sketches.empty(), "Requires at least 1 PRR-sketch to exist on calculating average size.");
+    return 1.0 * accumulate_sum(sketch_sizes()) / sketches.size();
+  }
+
+  auto success_rate() const -> double {
+    BOOST_ASSERT_MSG(total_n_attempts > 0, "Requires at least 1 attempts.");
+    return 1.0 * sketches.size() / total_n_attempts;
   }
 
   // Appends r new PRR-sketches
