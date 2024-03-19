@@ -42,17 +42,20 @@ struct WBIMSketchingParams {
   std::vector<vertex_id_t> n_boosted;
 };
 
-template <class SketchingParams>
-struct SketchingExperimentParams {
+struct WIMSketchingExperimentParams {
   rfl::Flatten<CommonExperimentParams> common;
-  rfl::Flatten<SketchingParams> sketching;
+  rfl::Flatten<WIMSketchingParams> sketching;
 
-  static auto parse_from_args(int argc, char** argv) noexcept
-      -> rfl::Result<SketchingExperimentParams<SketchingParams>>;
+  static auto parse_from_args(int argc, char** argv) noexcept -> rfl::Result<WIMSketchingExperimentParams>;
 };
 
-using WIMSketchingExperimentParams = SketchingExperimentParams<WIMSketchingParams>;
-using WBIMSketchingExperimentParams = SketchingExperimentParams<WBIMSketchingParams>;
+struct WBIMSketchingExperimentParams {
+  rfl::Flatten<CommonExperimentParams> common;
+  rfl::Flatten<WBIMSketchingParams> sketching;
+  rfl::Validator<vertex_id_t, rfl::Minimum<1>> n_seeds_to_generate = 10;
+
+  static auto parse_from_args(int argc, char** argv) noexcept -> rfl::Result<WBIMSketchingExperimentParams>;
+};
 
 struct MultiLevelParams {
   rfl::Flatten<CoarseningParams> coarsening;
@@ -64,18 +67,22 @@ struct MultiLevelParams {
   rfl::Validator<vertex_id_t, rfl::Minimum<0>> n_fast_expanding_levels = 0;
 };
 
-template <class SketchingParams>
-struct CoarseningExperimentParams {
+struct WIMCoarseningExperimentParams {
   rfl::Flatten<CommonExperimentParams> common;
-  rfl::Flatten<SketchingParams> sketching;
+  rfl::Flatten<WIMSketchingParams> sketching;
   rfl::Flatten<MultiLevelParams> multi_level;
 
-  static auto parse_from_args(int argc, char** argv) noexcept
-      -> rfl::Result<CoarseningExperimentParams<SketchingParams>>;
+  static auto parse_from_args(int argc, char** argv) noexcept -> rfl::Result<WIMCoarseningExperimentParams>;
 };
 
-using WIMCoarseningExperimentParams = CoarseningExperimentParams<WIMSketchingParams>;
-using WBIMCoarseningExperimentParams = CoarseningExperimentParams<WBIMSketchingParams>;
+struct WBIMCoarseningExperimentParams {
+  rfl::Flatten<CommonExperimentParams> common;
+  rfl::Flatten<WBIMSketchingParams> sketching;
+  rfl::Flatten<MultiLevelParams> multi_level;
+  rfl::Validator<vertex_id_t, rfl::Minimum<1>> n_seeds_to_generate = 10;
+
+  static auto parse_from_args(int argc, char** argv) noexcept -> rfl::Result<WBIMCoarseningExperimentParams>;
+};
 
 struct WIMContrastExperimentParams {
   bool with_max_degree = false;
@@ -107,5 +114,7 @@ auto wim_experiment(int argc, char** argv) noexcept -> ResultVoid;
 auto wbim_experiment(int argc, char** argv) noexcept -> ResultVoid;
 
 auto wim_coarsening_experiment(int argc, char** argv) noexcept -> ResultVoid;
+
+auto wbim_coarsening_experiment(int argc, char** argv) noexcept -> ResultVoid;
 
 auto wim_contrast_experiment(int argc, char** argv) noexcept -> ResultVoid;

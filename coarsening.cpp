@@ -646,6 +646,9 @@ auto merge_coarsened_wbim_edge_p_boost(WBIMCoarsenedEdgeDetails& dest, const WBI
     return get_merged_p(boosted_p_cross, gu.p_internal, heuristics, gu.n_members(), gv.n_members(), params);
   };
   dest.merged.p_boost = [&]() {
+    if (params.boosted_edge_weight_rule == BoostedEdgeWeightRule::ALL) {
+      return get_merged_p(dest.p_boost_cross, gu.p_internal, heuristics, gu.n_members(), gv.n_members(), params);
+    }
     if (params.boosted_edge_weight_rule == BoostedEdgeWeightRule::BEST_BOOSTED_INDEX) {
       return get_p_boost(gv.best_boosted_index);
     }
@@ -1181,8 +1184,8 @@ auto coarsen_wbim_graph_framework(const AdjacencyList<WBIMEdge>& graph, const In
                                   const CoarseningParams& params) -> rfl::Result<ResultType> {
   auto [n, m] = graph_n_m(graph);
   auto bidir_graph = merge_wbim_edge_to_undirected(graph, params);
-  auto [n_groups, group_id] = mongoose_match(bidir_graph, params);
-  return coarsen_wbim_graph_by_match_generic<ResultType>( //
+  auto [n_groups, group_id] = mongoose_match_s(bidir_graph, seeds.vertex_list, params); // Seeds must be isolated
+  return coarsen_wbim_graph_by_match_generic<ResultType>(                               //
       graph, inv_graph, vertex_weights, seeds, n_groups, group_id, params);
 }
 

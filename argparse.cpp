@@ -129,15 +129,13 @@ auto ToMatrixMarketParams::parse_from_args(int argc, char** argv) noexcept -> rf
       });
 }
 
-template <class SketchingParams>
-auto SketchingExperimentParams<SketchingParams>::parse_from_args(int argc, char** argv) noexcept
-    -> rfl::Result<SketchingExperimentParams<SketchingParams>> {
-  using ResultType = SketchingExperimentParams<SketchingParams>;
-  return parse_from_args_generic<ResultType>(
+auto WIMSketchingExperimentParams::parse_from_args(int argc, char** argv) noexcept
+    -> rfl::Result<WIMSketchingExperimentParams> {
+  return parse_from_args_generic<WIMSketchingExperimentParams>(
              argc, argv, // Appends --config etc.
              manual_add_config_arguments<ManualConfigArguments{.has_config = true, .requires_input_file = true}>,
-             read_arguments_from_config_file<ResultType>)
-      .and_then([](ResultType params) -> rfl::Result<ResultType> {
+             read_arguments_from_config_file<WIMSketchingExperimentParams>)
+      .and_then([](WIMSketchingExperimentParams params) -> rfl::Result<WIMSketchingExperimentParams> {
         auto err_msg = sort_and_check_sketching_params(*params.sketching);
         if (err_msg) {
           return rfl::Error{std::move(*err_msg)};
@@ -146,25 +144,13 @@ auto SketchingExperimentParams<SketchingParams>::parse_from_args(int argc, char*
       });
 }
 
-namespace {
-// Triggers template instantiation
-auto parse_wim_sketching_experiment_params(int argc, char** argv) noexcept {
-  return WIMSketchingExperimentParams::parse_from_args(argc, argv);
-}
-auto parse_wbim_sketching_experiment_params(int argc, char** argv) noexcept {
-  return WBIMSketchingExperimentParams::parse_from_args(argc, argv);
-}
-} // namespace
-
-template <class SketchingParams>
-auto CoarseningExperimentParams<SketchingParams>::parse_from_args(int argc, char** argv) noexcept
-    -> rfl::Result<CoarseningExperimentParams<SketchingParams>> {
-  using ResultType = CoarseningExperimentParams<SketchingParams>;
-  return parse_from_args_generic<ResultType>(
+auto WBIMSketchingExperimentParams::parse_from_args(int argc, char** argv) noexcept
+    -> rfl::Result<WBIMSketchingExperimentParams> {
+  return parse_from_args_generic<WBIMSketchingExperimentParams>(
              argc, argv, // Appends --config etc.
              manual_add_config_arguments<ManualConfigArguments{.has_config = true, .requires_input_file = true}>,
-             read_arguments_from_config_file<ResultType>)
-      .and_then([](ResultType params) -> rfl::Result<ResultType> {
+             read_arguments_from_config_file<WBIMSketchingExperimentParams>)
+      .and_then([](WBIMSketchingExperimentParams params) -> rfl::Result<WBIMSketchingExperimentParams> {
         auto err_msg = sort_and_check_sketching_params(*params.sketching);
         if (err_msg) {
           return rfl::Error{std::move(*err_msg)};
@@ -173,15 +159,35 @@ auto CoarseningExperimentParams<SketchingParams>::parse_from_args(int argc, char
       });
 }
 
-namespace {
-// Triggers template instantiation
-auto parse_wim_coarsening_experiment_params(int argc, char** argv) noexcept {
-  return WIMCoarseningExperimentParams::parse_from_args(argc, argv);
+auto WIMCoarseningExperimentParams::parse_from_args(int argc, char** argv) noexcept
+    -> rfl::Result<WIMCoarseningExperimentParams> {
+  return parse_from_args_generic<WIMCoarseningExperimentParams>(
+             argc, argv, // Appends --config etc.
+             manual_add_config_arguments<ManualConfigArguments{.has_config = true, .requires_input_file = true}>,
+             read_arguments_from_config_file<WIMCoarseningExperimentParams>)
+      .and_then([](WIMCoarseningExperimentParams params) -> rfl::Result<WIMCoarseningExperimentParams> {
+        auto err_msg = sort_and_check_sketching_params(*params.sketching);
+        if (err_msg) {
+          return rfl::Error{std::move(*err_msg)};
+        }
+        return std::move(params);
+      });
 }
-auto parse_wbim_coarsening_experiment_params(int argc, char** argv) noexcept {
-  return WBIMCoarseningExperimentParams::parse_from_args(argc, argv);
+
+auto WBIMCoarseningExperimentParams::parse_from_args(int argc, char** argv) noexcept
+    -> rfl::Result<WBIMCoarseningExperimentParams> {
+  return parse_from_args_generic<WBIMCoarseningExperimentParams>(
+             argc, argv, // Appends --config etc.
+             manual_add_config_arguments<ManualConfigArguments{.has_config = true, .requires_input_file = true}>,
+             read_arguments_from_config_file<WBIMCoarseningExperimentParams>)
+      .and_then([](WBIMCoarseningExperimentParams params) -> rfl::Result<WBIMCoarseningExperimentParams> {
+        auto err_msg = sort_and_check_sketching_params(*params.sketching);
+        if (err_msg) {
+          return rfl::Error{std::move(*err_msg)};
+        }
+        return std::move(params);
+      });
 }
-} // namespace
 
 auto WIMContrastExperimentParams::parse_from_args(int argc, char** argv) noexcept
     -> rfl::Result<WIMContrastExperimentParams> {

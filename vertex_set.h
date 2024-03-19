@@ -10,7 +10,7 @@ struct VertexSet {
   explicit VertexSet(vertex_id_t n) : vertex_list(), mask(n) {}
 
   VertexSet(vertex_id_t n, std::vector<vertex_id_t> vertices) : vertex_list(std::move(vertices)), mask(n) {
-    for (auto v : vertices) {
+    for (auto v : vertex_list) {
       BOOST_ASSERT_MSG(v >= 0 && v < n, "Vertex index out of range [0, n)");
       mask.set(v);
     }

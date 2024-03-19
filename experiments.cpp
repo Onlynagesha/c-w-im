@@ -399,9 +399,10 @@ auto do_continue_coarsening_wbim_graph(const WBIMAdjacencyListPair& original_gra
                                        std::vector<WBIMCoarsenGraphBriefResult>& coarsen_results,
                                        vertex_id_t destination_level, vertex_id_t coarsening_threshold,
                                        const CoarseningParams& params) -> rfl::Result<exp_states::CoarseningInfo> {
+  const auto* seeds_used = coarsen_results.empty() ? &seeds : &coarsen_results.back().coarsened_seeds;
   return do_continue_coarsening_graph_impl(
       original_graph, coarsen_results, destination_level, coarsening_threshold,
-      [&seeds, &params](const WBIMAdjacencyListPair& p) { return coarsen_wbim_graph_p(p, seeds, params); });
+      [seeds_used, &params](const WBIMAdjacencyListPair& p) { return coarsen_wbim_graph_p(p, *seeds_used, params); });
 }
 
 auto do_continue_coarsening_wim_graph(const WIMAdjacencyListPair& original_graph,
@@ -536,7 +537,7 @@ auto do_expand_vertices(const AdjacencyListPair<E>& original_graph,
     if constexpr (std::is_same_v<E, WIMEdge>) {
       return std::tuple{&InfoType::expanded_seeds, &ResultType::expanded_seeds};
     } else if constexpr (std::is_same_v<E, WBIMEdge>) {
-      return std::tuple{&ResultType::expanded_boosted, &ResultType::expanded_boosted};
+      return std::tuple{&InfoType::expanded_boosted, &ResultType::expanded_boosted};
     } else {
       static_assert(rfl::always_false_v<E>, "Invalid edge type.");
     }
@@ -591,8 +592,8 @@ template <class WBIMParamsType>
     { *params.common } -> std::convertible_to<CommonExperimentParams>;
     { *params.sketching } -> std::convertible_to<WBIMSketchingParams>;
   })
-auto do_wbim_experiment(const WBIMAdjacencyListPair& graph, const VertexSet& seeds,
-                        const WBIMSketchingExperimentParams& params, json* json_root) -> ResultVoid {
+auto do_wbim_experiment(const WBIMAdjacencyListPair& graph, const VertexSet& seeds, const WBIMParamsType& params,
+                        json* json_root) -> ResultVoid {
   BOOST_ASSERT(json_root != nullptr);
   write_graph_basic_information(*json_root, graph.adj_list);
 
@@ -620,7 +621,7 @@ auto do_wim_sketching_3_step_process(const AdjacencyListPair<WIMEdge>& original_
                                      const WIMSketchingParams& sketching_params,
                                      const MultiLevelParams& multi_level_params, json* json_root) -> ResultVoid {
   BOOST_ASSERT(json_root != nullptr);
-  auto* graph_for_algo = coarsen_results.empty() ? &original_graph : &coarsen_results.back().coarsened;
+  const auto* graph_for_algo = coarsen_results.empty() ? &original_graph : &coarsen_results.back().coarsened;
   return do_wim_experiment_get_seeds(*graph_for_algo, common_params, sketching_params)
       .and_then([&](exp_states::WIMSketchingGetSeedsResult coarsened_res) {
         (*json_root)["sketching"] = exp_states::to_json(coarsened_res);
@@ -642,6 +643,42 @@ auto do_wim_sketching_3_step_process(const AdjacencyListPair<WIMEdge>& original_
                                      const WIMCoarseningExperimentParams& params, json* json_root) -> ResultVoid {
   return do_wim_sketching_3_step_process( //
       original_graph, coarsen_results, *params.common, *params.sketching, *params.multi_level, json_root);
+}
+
+auto do_wbim_sketching_3_step_process(const AdjacencyListPair<WBIMEdge>& original_graph, const VertexSet& seeds,
+                                      std::span<const WBIMCoarsenGraphBriefResult> coarsen_results,
+                                      const CommonExperimentParams& common_params,
+                                      const WBIMSketchingParams& sketching_params,
+                                      const MultiLevelParams& multi_level_params, json* json_root) -> ResultVoid {
+  BOOST_ASSERT(json_root != nullptr);
+
+  const auto* graph_for_sketching = //
+      coarsen_results.empty() ? &original_graph : &coarsen_results.back().coarsened;
+  const auto* seeds_for_sketching = //
+      coarsen_results.empty() ? &seeds : &coarsen_results.back().coarsened_seeds;
+
+  return do_wbim_experiment_get_boosted(*graph_for_sketching, *seeds_for_sketching, common_params, sketching_params)
+      .and_then([&](exp_states::WBIMSketchingGetBoostedResult coarsened_res) {
+        (*json_root)["sketching"] = exp_states::to_json(coarsened_res);
+        return do_expand_vertices(original_graph, coarsen_results, coarsened_res.selected_boosted, multi_level_params);
+      })
+      .and_then([&](exp_states::WBIMExpansionResult expansion_res) {
+        (*json_root)["expanding"] = exp_states::to_json(expansion_res);
+        auto try_count = *common_params.simulation_try_count;
+        return do_wbim_experiment_simulate( //
+            original_graph, seeds, expansion_res.expanded_boosted, sketching_params, try_count, nullptr);
+      })
+      .transform([&](std::vector<exp_states::WBIMSketchingSimulationResult> sim_res) {
+        (*json_root)["simulating"] = exp_states::to_json(sim_res);
+        return RESULT_VOID_SUCCESS;
+      });
+}
+
+auto do_wbim_sketching_3_step_process(const AdjacencyListPair<WBIMEdge>& original_graph, const VertexSet& seeds,
+                                      std::span<const WBIMCoarsenGraphBriefResult> coarsen_results,
+                                      const WBIMCoarseningExperimentParams& params, json* json_root) -> ResultVoid {
+  return do_wbim_sketching_3_step_process( //
+      original_graph, seeds, coarsen_results, *params.common, *params.sketching, *params.multi_level, json_root);
 }
 
 auto do_wim_coarsening_experiment(const AdjacencyListPair<WIMEdge>& graph, const WIMCoarseningExperimentParams& params,
@@ -686,6 +723,52 @@ auto do_wim_coarsening_experiment(const AdjacencyListPair<WIMEdge>& graph, const
     ELOGFMT(INFO, "# of weakly connected components = {}", n_wcc);
     // Step 2.2: Solves on the coarsened graph -> exp_states::anding seeds -> Simulation to estimate F(S)
     RFL_RETURN_ON_ERROR(do_wim_sketching_3_step_process(graph, coarsen_results, params, &json_exp_cur));
+  }
+  return RESULT_VOID_SUCCESS;
+}
+
+auto do_wbim_coarsening_experiment(const AdjacencyListPair<WBIMEdge>& graph, const VertexSet& seeds,
+                                   const WBIMCoarseningExperimentParams& params, json* json_root) -> ResultVoid {
+  BOOST_ASSERT(json_root != nullptr);
+  auto timer = nw::util::seconds_timer{};
+  auto& json_exp = (*json_root)["experiments"];
+
+  const auto& [adj_list, inv_adj_list, vertex_weights] = graph;
+  auto [n, m] = write_graph_basic_information(*json_root, adj_list);
+
+  if (n <= *params.multi_level->coarsening_threshold) {
+    constexpr auto msg_pattern = "Experiments fails to proceed since |V| <= threshold, with |V| = {}, threshold = {}";
+    return rfl::Error{fmt::format(msg_pattern, n, *params.multi_level->coarsening_threshold)};
+  }
+  // Step 1: Level 0, i.e. initial graph
+  {
+    ELOG_INFO << "Starts Level 0: solves WBIM problem on the original graph.";
+    auto& json_exp_cur = json_exp.emplace_back(json{{"level", 0}});
+    auto n_wcc = write_graph_connectivity_information(json_exp_cur, graph);
+    ELOGFMT(INFO, "# of weakly connected components = {}", n_wcc);
+    RFL_RETURN_ON_ERROR(do_wbim_experiment(graph, seeds, params, &json_exp_cur));
+  }
+
+  // Step 2: Coarsening until the size threshold
+  auto coarsen_results = std::vector<WBIMCoarsenGraphBriefResult>{};
+  for (auto level = 1_vid, n_coarsened = n; n_coarsened > params.multi_level->coarsening_threshold; ++level) {
+    auto& json_exp_cur = json_exp.emplace_back(json{{"level", level}});
+    // Step 2.1: Gets the coarsened graph
+    auto coarsen_success = //
+        do_continue_coarsening_wbim_graph(graph, seeds, coarsen_results, level, *params.multi_level)
+            .transform([&](exp_states::CoarseningInfo info) {
+              json_exp_cur["coarsening"] = exp_states::to_json(info);
+              return RESULT_VOID_SUCCESS;
+            });
+    RFL_RETURN_ON_ERROR(coarsen_success);
+    const auto& cur_coarsen_result = coarsen_results.back();
+    n_coarsened = cur_coarsen_result.coarsened.n_vertices();
+
+    // Checks connectivity for debugging & data analysis
+    auto n_wcc = write_graph_connectivity_information(json_exp_cur, cur_coarsen_result.coarsened);
+    ELOGFMT(INFO, "# of weakly connected components = {}", n_wcc);
+    // Step 2.2: Solves on the coarsened graph -> exp_states::anding seeds -> Simulation to estimate F(S)
+    RFL_RETURN_ON_ERROR(do_wbim_sketching_3_step_process(graph, seeds, coarsen_results, params, &json_exp_cur));
   }
   return RESULT_VOID_SUCCESS;
 }
@@ -786,7 +869,7 @@ auto do_wim_contrast_experiment(const AdjacencyListPair<WIMEdge>& graph, const W
 #undef CONTRAST_EXPERIMENT_FN
 
 template <class ParamsType, class DoExperimentFn>
-auto experiment_framework(int argc, char** argv, DoExperimentFn&& do_experiment_fn) -> ResultVoid try {
+auto wim_experiment_framework(int argc, char** argv, DoExperimentFn&& do_experiment_fn) -> ResultVoid try {
   auto timer = nw::util::seconds_timer{};
 
   return ParamsType::parse_from_args(argc, argv).and_then([&](ParamsType params) {
@@ -813,17 +896,64 @@ auto experiment_framework(int argc, char** argv, DoExperimentFn&& do_experiment_
   });
 }
 RFL_RESULT_CATCH_HANDLER()
+
+template <class ParamsType, class DoExperimentFn>
+auto wbim_experiment_framework(int argc, char** argv, DoExperimentFn&& do_experiment_fn) -> ResultVoid try {
+  auto timer = nw::util::seconds_timer{};
+
+  return ParamsType::parse_from_args(argc, argv).and_then([&](ParamsType params) {
+    init_easylog(*params.common);
+    ELOGFMT(INFO, "Parameters: {:4}", params);
+    auto json_fout_ptr = create_json_fout_ptr(params.common->json_output_file);
+
+    timer.start();
+    return read_directed_wbim_adjacency_lists(params.common->input_file)
+        .and_then([&](AdjacencyListPair<WBIMEdge> read_result) -> ResultVoid {
+          auto [n, m] = read_result.graph_n_m();
+          if (*params.n_seeds_to_generate <= 0 || *params.n_seeds_to_generate >= n) {
+            constexpr auto msg_pattern = "Invalid # of seeds to generate (input: {}): "
+                                         "Must be in the range [1, |V|-1] (with |V| = {})";
+            return rfl::Error{fmt::format(msg_pattern, *params.n_seeds_to_generate, n - 1)};
+          }
+          auto seeds = VertexSet{n, max_out_strength(read_result.adj_list, *params.n_seeds_to_generate)};
+          ELOGFMT(INFO, "Seeds generated for WBIM experiment:\n{}", //
+                  dump_vertices_selected(read_result, seeds.vertex_list));
+
+          timer.stop();
+          auto read_graph_time = timer.elapsed();
+          ELOGFMT(INFO, "Done reading graph. |V| = {}, |E| = {}, time usage = {:.3} sec.", n, m, read_graph_time);
+
+          // During experiment: do_experiment_fn(const AdjacencyListPair<E>&, const ParamsType&) -> ResultVoid
+          auto json_root = json{};
+          return std::invoke(do_experiment_fn, read_result, seeds, params, &json_root).transform([&](rfl::Nothing) {
+            auto json_root_str = json_root.dump(4);
+            dump_to_json_fout_str(json_fout_ptr.get(), json_root_str);
+            return RESULT_VOID_SUCCESS;
+          });
+        });
+  });
+}
+RFL_RESULT_CATCH_HANDLER()
 } // namespace
 
 auto wim_experiment(int argc, char** argv) noexcept -> ResultVoid {
-  return experiment_framework<WIMSketchingExperimentParams>( //
+  return wim_experiment_framework<WIMSketchingExperimentParams>( //
       argc, argv, do_wim_experiment<WIMSketchingExperimentParams>);
 }
 
+auto wbim_experiment(int argc, char** argv) noexcept -> ResultVoid {
+  return wbim_experiment_framework<WBIMSketchingExperimentParams>( //
+      argc, argv, do_wbim_experiment<WBIMSketchingExperimentParams>);
+}
+
 auto wim_coarsening_experiment(int argc, char** argv) noexcept -> ResultVoid {
-  return experiment_framework<WIMCoarseningExperimentParams>(argc, argv, do_wim_coarsening_experiment);
+  return wim_experiment_framework<WIMCoarseningExperimentParams>(argc, argv, do_wim_coarsening_experiment);
+}
+
+auto wbim_coarsening_experiment(int argc, char** argv) noexcept -> ResultVoid {
+  return wbim_experiment_framework<WBIMCoarseningExperimentParams>(argc, argv, do_wbim_coarsening_experiment);
 }
 
 auto wim_contrast_experiment(int argc, char** argv) noexcept -> ResultVoid {
-  return experiment_framework<WIMContrastExperimentParams>(argc, argv, do_wim_contrast_experiment);
+  return wim_experiment_framework<WIMContrastExperimentParams>(argc, argv, do_wim_contrast_experiment);
 }

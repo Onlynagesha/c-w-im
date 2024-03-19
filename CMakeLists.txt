@@ -80,14 +80,22 @@ target_link_libraries(experiment-components PRIVATE yyjson-components)
 
 set(EXPERIMENT_EXECUTABLES
     wim-experiment
+    wbim-experiment
     wim-coarsening-experiment
+    wbim-coarsening-experiment
     wim-contrast-experiment)
 
 add_executable(wim-experiment
     main_wim_experiment.cpp)
 
+add_executable(wbim-experiment
+    main_wbim_experiment.cpp)
+
 add_executable(wim-coarsening-experiment
     main_wim_coarsening_experiment.cpp)
+
+add_executable(wbim-coarsening-experiment
+    main_wbim_coarsening_experiment.cpp)
 
 add_executable(wim-contrast-experiment
     main_wim_contrast_experiment.cpp)

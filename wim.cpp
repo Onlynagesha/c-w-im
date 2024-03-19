@@ -10,16 +10,21 @@ namespace {
 template <ranges::random_access_range SetRange, ranges::random_access_range InvSetRange>
   requires(forward_range_of<ranges::range_value_t<SetRange>, vertex_id_t> &&
            forward_range_of<ranges::range_value_t<InvSetRange>, size_t>)
-auto greedy_max_cover(const SetRange& sets, const InvSetRange& inv_sets, vertex_id_t k) -> std::vector<vertex_id_t> {
+auto greedy_max_cover(const SetRange& sets, const InvSetRange& inv_sets, vertex_id_t k,
+                      std::span<const vertex_id_t> skipped_list = {}) -> std::vector<vertex_id_t> {
   auto n_sets = ranges::size(sets);
   auto n_elements = static_cast<vertex_id_t>(ranges::size(inv_sets)); // Elements are indexed from 0 to n-1
 
-  k = std::min(k, n_elements);
+  k = std::min(k, n_elements - static_cast<vertex_id_t>(skipped_list.size()));
   // Uses negative count to mark the vertices that are already selected
   auto cover_count = [&] {
     auto view = inv_sets | views::transform(ranges::ssize);
     return std::vector(view.begin(), view.end());
   }();
+  for (auto v : skipped_list) {
+    BOOST_ASSERT_MSG(v < n_elements, "Element out of range [0, n).");
+    cover_count[v] = -1; // Marks the skipped as invalid
+  }
   auto covered = DynamicBitset{n_sets};
   auto res = make_reserved_vector<vertex_id_t>(k);
 
@@ -35,6 +40,7 @@ auto greedy_max_cover(const SetRange& sets, const InvSetRange& inv_sets, vertex_
       covered.set(r);
       for (auto v : sets[r]) {
         cover_count[v] -= 1;
+        BOOST_ASSERT_MSG(cover_count[v] >= 0, "Cover count can not be decreased to negative.");
       }
     }
   }
@@ -603,12 +609,19 @@ auto PRRSketchSet::append_single(vertex_id_t center, vertex_id_t k, void* cache_
 }
 
 auto PRRSketchSet::append(size_t n_sketches, vertex_id_t k) noexcept -> void {
+  constexpr auto N_ATTEMPTS_PER_LOG_MESSAGE = 10'000;
+
   auto cache_obj = PRRSketchCache{};
   for (auto success_count = 0zu; success_count < n_sketches;) {
     total_n_attempts += 1;
+    if (total_n_attempts % N_ATTEMPTS_PER_LOG_MESSAGE == 0) {
+      MYLOG_FMT_DEBUG("PRR-sketching: Total # of attempts reaches {}.", total_n_attempts);
+    }
     auto center = center_distribution(rand_engine);
+    if (seeds->contains(center)) {
+      continue;
+    }
     if (append_single(center, k, &cache_obj)) {
-      MYLOG_FMT_TRACE("PRR-Sketch #{}: Picks vertex #{} as center.", success_count, center);
       success_count += 1;
     }
   }
@@ -619,7 +632,7 @@ auto PRRSketchSet::select(vertex_id_t k) const noexcept -> std::vector<vertex_id
     return {}; // Corner case: Empty list if k == 0
   }
   auto n = n_vertices();
-  k = std::min(k, n);
+  k = std::min(k, n - seeds->size());
 
   auto res = make_reserved_vector<vertex_id_t>(k);
   auto best_critical = ranges::max(range(n), ranges::less{}, LAMBDA_1(inv_critical[_1].size()));
@@ -653,7 +666,10 @@ auto PRRSketchSet::select(vertex_id_t k) const noexcept -> std::vector<vertex_id
       MYLOG_FMT_TRACE("After PRR-sketch #{}: coverage => {}", sketch_index, dump_coverage(coverage));
     }
     for (auto v : res) {
-      coverage[v].assign({PRRSketchSet::NULL_INDEX}); // Marks as invalid
+      coverage[v].assign({PRRSketchSet::NULL_INDEX}); // Marks the already selected vertices as invalid
+    }
+    for (auto s : seeds->vertex_list) {
+      coverage[s].assign({PRRSketchSet::NULL_INDEX}); // Marks the seeds as invalid
     }
     auto best = ranges::max(range(n), ranges::less{}, [&](vertex_id_t v) {
       if (!coverage[v].empty() && coverage[v].front() == PRRSketchSet::NULL_INDEX) {
@@ -661,6 +677,7 @@ auto PRRSketchSet::select(vertex_id_t k) const noexcept -> std::vector<vertex_id
       }
       return ranges::ssize(coverage[v]);
     });
+    BOOST_ASSERT_MSG(!seeds->contains(best), "Seeds can not be selected.");
     MYLOG_FMT_DEBUG("Selects result[{}] = {} (which covers {} more PRR-sketches)", //
                     candidate_index, best, coverage[best].size());
     res.push_back(best);
@@ -668,11 +685,14 @@ auto PRRSketchSet::select(vertex_id_t k) const noexcept -> std::vector<vertex_id
       covered.set(sketch_index);
     }
   }
+  ELOGFMT(INFO, "Finished selecting boosted vertices. {:.3f}% of PRR-sketched covered.",
+          100.0 * covered.count() / n_sketches());
   return res;
 }
 
 auto PRRSketchSet::select_by_critical(vertex_id_t k) const noexcept -> std::vector<vertex_id_t> {
-  return greedy_max_cover(sketches | TRANSFORM_VIEW(std::span{_1.critical_vertices}), inv_critical, k);
+  return greedy_max_cover( // Seeds shall not be selected
+      sketches | TRANSFORM_VIEW(std::span{_1.critical_vertices}), inv_critical, k, seeds->vertex_list);
 }
 
 auto wim_simulate(const AdjacencyList<WIMEdge>& graph, const VertexSet& seeds, uint64_t try_count) noexcept

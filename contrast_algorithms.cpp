@@ -34,7 +34,7 @@ auto max_out_degree_generic(const graph::adjacency<IsInv, E>& graph, vertex_id_t
   auto indices = std::vector<vertex_id_t>(n);
   std::iota(indices.begin(), indices.end(), 0);
   // Sorts indices by (weighted) out-degree in descending order
-  ranges::sort(indices, ranges::greater{}, LAMBDA_1(out_degrees[_1]));
+  ranges::stable_sort(indices, ranges::greater{}, LAMBDA_1(out_degrees[_1]));
   MYLOG_TRACE([&]() {
     auto str = fmt::format("Result of {} sorting:", uses_edge_weight ? "max-strength" : "max-degree");
     auto arr_name = uses_edge_weight ? "max_strength" : "max_degree";
@@ -158,8 +158,8 @@ auto best_pagerank_generic(const AdjacencyList<E>& graph, const InvAdjacencyList
         auto indices = std::vector<vertex_id_t>(n);
         std::iota(indices.begin(), indices.end(), 0);
 
-        takes_max ? ranges::sort(indices, ranges::greater{}, LAMBDA_1(PR[_1]))
-                  : ranges::sort(indices, ranges::less{}, LAMBDA_1(PR[_1]));
+        takes_max ? ranges::stable_sort(indices, ranges::greater{}, LAMBDA_1(PR[_1]))
+                  : ranges::stable_sort(indices, ranges::less{}, LAMBDA_1(PR[_1]));
         return std::vector<vertex_id_t>{indices.begin(), indices.begin() + k};
       });
 }
@@ -200,7 +200,7 @@ auto imrank_generic(const InvAdjacencyList<E>& inv_graph, const IMRankParams& pa
     MYLOG_FMT_TRACE("At iteration #{}: Mr = {::.4f}", iteration_index, Mr);
 
     ranges::copy(sorted_vertices, sorted_vertices_temp.begin());
-    ranges::sort(sorted_vertices_temp, ranges::greater{}, LAMBDA_1(Mr[_1]));
+    ranges::stable_sort(sorted_vertices_temp, ranges::greater{}, LAMBDA_1(Mr[_1]));
     MYLOG_FMT_TRACE("At iteration #{}: sorted_vertices => {}", iteration_index, sorted_vertices_temp);
 
     if (ranges::equal(sorted_vertices | views::take(k), sorted_vertices_temp | views::take(k))) {

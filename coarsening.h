@@ -14,7 +14,7 @@ enum class EdgeWeightRule { SEPARATE_SIMPLE, MERGED_SIMPLE, SEPARATE_PRECISE, ME
 
 enum class SeedEdgeWeightRule { AVERAGE, MAX, BEST_SEED_INDEX };
 
-enum class BoostedEdgeWeightRule { AVERAGE, MAX, BEST_BOOSTED_INDEX };
+enum class BoostedEdgeWeightRule { AVERAGE, MAX, BEST_BOOSTED_INDEX, ALL };
 
 enum class InOutHeuristicRule { UNIT, COUNT, P, W, SEED_P, SEED_W };
 
