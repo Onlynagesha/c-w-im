@@ -76,6 +76,49 @@ auto write_graph_connectivity_information(json& json_root, const AdjacencyListPa
   return n_wcc;
 }
 
+auto generate_wbim_seeds(const WBIMAdjacencyListPair& graph, const WBIMSeedGeneratingParams& params)
+    -> rfl::Result<VertexSet> {
+  auto [n, m] = graph.graph_n_m();
+  if (**params.n_seeds >= n) {
+    constexpr auto msg_pattern = "Failed to generate seeds for WBIM experiment since the required # of seeds "
+                                 "(which is {}) is not less than |V| (which is {}).";
+    return rfl::Error{fmt::format(msg_pattern, **params.n_seeds, n)};
+  }
+
+  auto n_candidates = static_cast<vertex_id_t>(n * (**params.candidate_ratio));
+  if (n_candidates <= **params.n_seeds) {
+    constexpr auto msg_pattern = "Failed to generate seeds for WBIM experiment since the # of candidates "
+                                 "({} * {} = {}) is no more than the # of seeds (which {})";
+    return rfl::Error{fmt::format(msg_pattern, n, **params.candidate_ratio, n_candidates, **params.n_seeds)};
+  }
+  MYLOG_FMT_DEBUG("Seed generation: {} candidates from {} vertices.", n_candidates, n);
+  auto candidates = max_out_strength(graph.adj_list, n_candidates);
+
+  auto n_wcc = n_weakly_connected_components(graph.adj_list, graph.inv_adj_list);
+  if (n_wcc > *params.max_n_wcc_without_seeds) {
+    constexpr auto msg_pattern = "Failed to generate seeds for WBIM experiment since the WCC constraint "
+                                 "(<= {} WCCs required) is below the graph itself (# of WCCs = {})";
+    return rfl::Error{fmt::format(msg_pattern, *params.max_n_wcc_without_seeds, n_wcc)};
+  }
+
+  auto selected_list = std::vector<vertex_id_t>(**params.n_seeds);
+  auto local_rand_engine = std::mt19937{1u}; // Fixed seed
+  for (auto try_index = uint64_t{0}; try_index < **params.max_try_count; try_index++) {
+    // Uses local rand engine (whose seed is fixed) to ensure fixed generation result.
+    ranges::sample(candidates, selected_list.begin(), selected_list.size(), local_rand_engine);
+    auto n_wccs_without_selected = n_weakly_connected_components(graph.adj_list, graph.inv_adj_list, selected_list);
+    if (n_wccs_without_selected > *params.max_n_wcc_without_seeds) {
+      continue; // Failed this time.
+    }
+    constexpr auto msg_pattern = "Done seed selection after {} trials. # of WCCs after removing seeds = {}. "
+                                 "Details of selected seeds:\n{}";
+    ELOGFMT(INFO, msg_pattern, 1 + try_index, n_wccs_without_selected, dump_vertices_selected(graph, selected_list));
+    return VertexSet{n, std::move(selected_list)};
+  }
+  return rfl::Error{fmt::format( //
+      "Failed to generate seeds for WBIM experiment after {} trials.", **params.max_try_count)};
+}
+
 auto do_wim_experiment_get_seeds(const WIMAdjacencyListPair& graph, const CommonExperimentParams& common,
                                  const WIMSketchingParams& sketching)
     -> rfl::Result<exp_states::WIMSketchingGetSeedsResult> {
@@ -170,22 +213,26 @@ auto do_wbim_experiment_get_boosted(const WBIMAdjacencyListPair& graph, const Ve
     auto prr_sketches_new_time_used = timer.elapsed();
     prr_sketches_total_time_used += prr_sketches_new_time_used;
 
-    auto avg_sketch_size = prr_sketches.average_sketch_size();
+    auto avg_sketch_n_vertices = prr_sketches.average_sketch_n_vertices();
+    auto avg_sketch_n_edges = prr_sketches.average_sketch_n_edges();
+    auto total_sketch_size_bytes = prr_sketches.sketch_total_size_bytes();
     auto success_rate = prr_sketches.success_rate();
     // Log of time usage & statistics of RR-sketches
     constexpr auto msg_pattern_1 = //
         "Done appending new {1} PRR-sketches in {3:.3f} sec."
-        "\n\tAverage size of all the {0} RR-sketches = {4:.3f}, success rate = {5:.3f}%)."
+        "\n\tAverage |V|, |E| in PRR-sketches = {4:.3f}, {5:.3f}."
+        "\n\tTotal size of PRR-sketches = {6}. success rate = {7:.3f}%."
         "\n\tTotal time used = {2:.3f} sec.";
     ELOGFMT(INFO, msg_pattern_1,                                      //
             r, r_new,                                                 // {0}, {1}
             prr_sketches_total_time_used, prr_sketches_new_time_used, // {2}, {3}
-            avg_sketch_size,                                          // {4}
-            success_rate * 100.0                                      // {5}
+            avg_sketch_n_vertices, avg_sketch_n_edges,                // {4}, {5}
+            size_bytes_to_memory_str(total_sketch_size_bytes),        // {6}
+            success_rate * 100.0                                      // {7}
     );
     // Histogram of the distribution of RR-sketch size
-    MYLOG_FMT_DEBUG("Histogram of PRR-sketch sizes:\n{}",
-                    make_histogram(prr_sketches.sketch_sizes(), common.histogram_shape()));
+    MYLOG_FMT_DEBUG("Distribution of |V| in PRR_sketches:\n{}",
+                    make_histogram(prr_sketches.sketch_n_vertices(), common.histogram_shape()));
 
     timer.start();
     auto selected_boosted = prr_sketches.select(max_n_boosted);
@@ -195,17 +242,31 @@ auto do_wbim_experiment_get_boosted(const WBIMAdjacencyListPair& graph, const Ve
             max_n_boosted, r, boosted_selecting_time_usage);
     MYLOG_DEBUG(dump_vertices_selected(graph, selected_boosted));
 
+    timer.start();
+    auto selected_boosted_by_critical = prr_sketches.select_by_critical(max_n_boosted);
+    timer.stop();
+    auto boosted_selecting_by_critical_time_usage = timer.elapsed();
+    ELOGFMT(INFO, "Done selecting {} boosted with critical points in {} PRR-sketches. Time used = {:.3f} sec.", //
+            max_n_boosted, r, boosted_selecting_by_critical_time_usage);
+    MYLOG_DEBUG(dump_vertices_selected(graph, selected_boosted_by_critical));
+
     // Result
     auto info_item = exp_states::WBIMSketchingInfo{
         .n_sketches = r,
         .selected_boosted = std::move(selected_boosted),
-        .average_sketch_size = avg_sketch_size,
+        .selected_boosted_by_critical = std::move(selected_boosted_by_critical),
+        .average_sketch_n_vertices = avg_sketch_n_vertices,
+        .average_sketch_n_edges = avg_sketch_n_edges,
+        .total_sketch_size_bytes = total_sketch_size_bytes,
         .sketching_success_rate = success_rate,
         .sketching_total_time_usage = prr_sketches_total_time_used,
         .boosted_selecting_time_usage = boosted_selecting_time_usage,
+        .boosted_selecting_time_usage_by_critical = boosted_selecting_by_critical_time_usage,
     };
     // A COPY into res.selected_boosted
     res.selected_boosted.push_back(info_item.selected_boosted);
+    // A COPY into res.selected_boosted_by_critical
+    res.selected_boosted_by_critical.push_back(info_item.selected_boosted_by_critical);
     res.sketching_info.push_back(std::move(info_item));
   }
   return std::move(res);
@@ -599,17 +660,21 @@ auto do_wbim_experiment(const WBIMAdjacencyListPair& graph, const VertexSet& see
 
   return do_wbim_experiment_get_boosted(graph, seeds, *params.common, *params.sketching)
       .and_then([&](exp_states::WBIMSketchingGetBoostedResult get_boosted_res) {
+        (*json_root)["sketching"] = exp_states::to_json(get_boosted_res);
+
         auto [n, m] = graph.graph_n_m();
         auto try_count = *params.common->simulation_try_count;
         return wbim_simulate_w(graph.adj_list, graph.vertex_weights, seeds, {n, {}}, try_count)
-            .and_then([&](double base_F) {
-              return do_wbim_experiment_simulate( //
+            .and_then([&](double base_F) -> ResultVoid {
+              auto sim_res = do_wbim_experiment_simulate( //
                   graph, seeds, get_boosted_res.selected_boosted, *params.sketching, try_count, &base_F);
-            })
-            .transform([&](std::vector<exp_states::WBIMSketchingSimulationResult> sim_res) {
-              BOOST_ASSERT(sim_res.size() == params.sketching->n_sketches.size());
-              (*json_root)["sketching"] = exp_states::to_json(get_boosted_res);
-              (*json_root)["simulating"] = exp_states::to_json(sim_res);
+              RFL_RETURN_ON_ERROR(sim_res);
+              auto sim_res_by_critical = do_wbim_experiment_simulate( //
+                  graph, seeds, get_boosted_res.selected_boosted_by_critical, *params.sketching, try_count, &base_F);
+              RFL_RETURN_ON_ERROR(sim_res_by_critical);
+
+              (*json_root)["simulating"] = exp_states::to_json(*sim_res);
+              (*json_root)["simulating_by_critical"] = exp_states::to_json(*sim_res_by_critical);
               return RESULT_VOID_SUCCESS;
             });
       });
@@ -657,20 +722,35 @@ auto do_wbim_sketching_3_step_process(const AdjacencyListPair<WBIMEdge>& origina
   const auto* seeds_for_sketching = //
       coarsen_results.empty() ? &seeds : &coarsen_results.back().coarsened_seeds;
 
+  const auto& [orig_adj_list, orig_inv_adj_list, orig_vertex_weights] = original_graph;
+  auto [orig_n, orig_m] = original_graph.graph_n_m();
+  auto sim_try_count = *common_params.simulation_try_count;
+
+  auto base_F_obj = wbim_simulate_w(orig_adj_list, orig_vertex_weights, seeds, {orig_n, {}}, sim_try_count);
+  RFL_RETURN_ON_ERROR(base_F_obj);
+  auto base_F = *base_F_obj;
+
   return do_wbim_experiment_get_boosted(*graph_for_sketching, *seeds_for_sketching, common_params, sketching_params)
-      .and_then([&](exp_states::WBIMSketchingGetBoostedResult coarsened_res) {
+      .and_then([&](exp_states::WBIMSketchingGetBoostedResult coarsened_res) -> ResultVoid {
         (*json_root)["sketching"] = exp_states::to_json(coarsened_res);
-        return do_expand_vertices(original_graph, coarsen_results, coarsened_res.selected_boosted, multi_level_params);
-      })
-      .and_then([&](exp_states::WBIMExpansionResult expansion_res) {
-        (*json_root)["expanding"] = exp_states::to_json(expansion_res);
-        auto try_count = *common_params.simulation_try_count;
-        return do_wbim_experiment_simulate( //
-            original_graph, seeds, expansion_res.expanded_boosted, sketching_params, try_count, nullptr);
-      })
-      .transform([&](std::vector<exp_states::WBIMSketchingSimulationResult> sim_res) {
-        (*json_root)["simulating"] = exp_states::to_json(sim_res);
-        return RESULT_VOID_SUCCESS;
+
+        auto do_step_2_3 = [&](std::string_view expanding_key, std::string_view simulating_key,
+                               const VertexListList& selected_boosted) -> ResultVoid {
+          return do_expand_vertices(original_graph, coarsen_results, selected_boosted, multi_level_params)
+              .and_then([&](exp_states::WBIMExpansionResult expansion_res) {
+                (*json_root)[expanding_key] = exp_states::to_json(expansion_res);
+                return do_wbim_experiment_simulate(original_graph, seeds, expansion_res.expanded_boosted,
+                                                   sketching_params, sim_try_count, &base_F);
+              })
+              .transform([&](std::vector<exp_states::WBIMSketchingSimulationResult> sim_res) {
+                (*json_root)[simulating_key] = exp_states::to_json(sim_res);
+                return RESULT_VOID_SUCCESS;
+              });
+        };
+        return do_step_2_3("expanding", "simulating", coarsened_res.selected_boosted).and_then([&](auto) {
+          const auto& by_critical = coarsened_res.selected_boosted_by_critical;
+          return do_step_2_3("expanding_by_critical", "simulating_by_critical", by_critical);
+        });
       });
 }
 
@@ -695,7 +775,7 @@ auto do_wim_coarsening_experiment(const AdjacencyListPair<WIMEdge>& graph, const
     return rfl::Error{fmt::format(msg_pattern, n, *params.multi_level->coarsening_threshold)};
   }
   // Step 1: Level 0, i.e. initial graph
-  {
+  if (!params.skips_first_level) {
     ELOG_INFO << "Starts Level 0: solves WIM problem on the original graph.";
     auto& json_exp_cur = json_exp.emplace_back(json{{"level", 0}});
     auto n_wcc = write_graph_connectivity_information(json_exp_cur, graph);
@@ -741,7 +821,7 @@ auto do_wbim_coarsening_experiment(const AdjacencyListPair<WBIMEdge>& graph, con
     return rfl::Error{fmt::format(msg_pattern, n, *params.multi_level->coarsening_threshold)};
   }
   // Step 1: Level 0, i.e. initial graph
-  {
+  if (!params.skips_first_level) {
     ELOG_INFO << "Starts Level 0: solves WBIM problem on the original graph.";
     auto& json_exp_cur = json_exp.emplace_back(json{{"level", 0}});
     auto n_wcc = write_graph_connectivity_information(json_exp_cur, graph);
@@ -869,6 +949,8 @@ auto do_wim_contrast_experiment(const AdjacencyListPair<WIMEdge>& graph, const W
 #undef CONTRAST_EXPERIMENT_FN
 
 template <class ParamsType, class DoExperimentFn>
+  requires(std::is_invocable_r_v<ResultVoid, DoExperimentFn, // do_experiment_fn(graph, params, &json_root)
+                                 const WIMAdjacencyListPair&, const ParamsType&, json*>)
 auto wim_experiment_framework(int argc, char** argv, DoExperimentFn&& do_experiment_fn) -> ResultVoid try {
   auto timer = nw::util::seconds_timer{};
 
@@ -885,7 +967,6 @@ auto wim_experiment_framework(int argc, char** argv, DoExperimentFn&& do_experim
           auto m = read_result.adj_list.num_edges();
           ELOGFMT(INFO, "Done reading graph. |V| = {}, |E| = {}, time usage = {:.3} sec.", n, m, read_graph_time);
 
-          // During experiment: do_experiment_fn(const AdjacencyListPair<E>&, const ParamsType&) -> ResultVoid
           auto json_root = json{};
           return std::invoke(do_experiment_fn, read_result, params, &json_root).transform([&](rfl::Nothing) {
             auto json_root_str = json_root.dump(4);
@@ -898,6 +979,8 @@ auto wim_experiment_framework(int argc, char** argv, DoExperimentFn&& do_experim
 RFL_RESULT_CATCH_HANDLER()
 
 template <class ParamsType, class DoExperimentFn>
+  requires(std::is_invocable_r_v<ResultVoid, DoExperimentFn, // do_experiment_fn(graph, seeds, params, &json_root)
+                                 const WBIMAdjacencyListPair&, const VertexSet&, const ParamsType&, json*>)
 auto wbim_experiment_framework(int argc, char** argv, DoExperimentFn&& do_experiment_fn) -> ResultVoid try {
   auto timer = nw::util::seconds_timer{};
 
@@ -910,25 +993,19 @@ auto wbim_experiment_framework(int argc, char** argv, DoExperimentFn&& do_experi
     return read_directed_wbim_adjacency_lists(params.common->input_file)
         .and_then([&](AdjacencyListPair<WBIMEdge> read_result) -> ResultVoid {
           auto [n, m] = read_result.graph_n_m();
-          if (*params.n_seeds_to_generate <= 0 || *params.n_seeds_to_generate >= n) {
-            constexpr auto msg_pattern = "Invalid # of seeds to generate (input: {}): "
-                                         "Must be in the range [1, |V|-1] (with |V| = {})";
-            return rfl::Error{fmt::format(msg_pattern, *params.n_seeds_to_generate, n - 1)};
-          }
-          auto seeds = VertexSet{n, max_out_strength(read_result.adj_list, *params.n_seeds_to_generate)};
-          ELOGFMT(INFO, "Seeds generated for WBIM experiment:\n{}", //
-                  dump_vertices_selected(read_result, seeds.vertex_list));
+          return generate_wbim_seeds(read_result, *params.seed_generating).and_then([&](VertexSet seeds) {
+            timer.stop();
+            auto read_graph_time = timer.elapsed();
+            constexpr auto msg_pattern_1 = "Done reading graph and generating seeds for WBIM Experiment. "
+                                           "|V| = {}, |E| = {}, time usage = {:.3} sec.";
+            ELOGFMT(INFO, msg_pattern_1, n, m, read_graph_time);
 
-          timer.stop();
-          auto read_graph_time = timer.elapsed();
-          ELOGFMT(INFO, "Done reading graph. |V| = {}, |E| = {}, time usage = {:.3} sec.", n, m, read_graph_time);
-
-          // During experiment: do_experiment_fn(const AdjacencyListPair<E>&, const ParamsType&) -> ResultVoid
-          auto json_root = json{};
-          return std::invoke(do_experiment_fn, read_result, seeds, params, &json_root).transform([&](rfl::Nothing) {
-            auto json_root_str = json_root.dump(4);
-            dump_to_json_fout_str(json_fout_ptr.get(), json_root_str);
-            return RESULT_VOID_SUCCESS;
+            auto json_root = json{{"seeds", seeds.vertex_list}};
+            return std::invoke(do_experiment_fn, read_result, seeds, params, &json_root).transform([&](rfl::Nothing) {
+              auto json_root_str = json_root.dump(4);
+              dump_to_json_fout_str(json_fout_ptr.get(), json_root_str);
+              return RESULT_VOID_SUCCESS;
+            });
           });
         });
   });

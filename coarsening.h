@@ -36,7 +36,7 @@ struct CoarseningParams {
   BoostedSelectionRule boosted_selection_rule = BoostedSelectionRule::AS_TARGET;
   InOutHeuristicRule in_out_heuristic_rule = InOutHeuristicRule::P;
   VertexWeightRule vertex_weight_rule = VertexWeightRule::AVERAGE_BY_PATHS;
-  vertex_id_t max_distance_from_seed = 6;
+  vertex_id_t max_distance_from_seed = 3;
 };
 
 struct ExpandingParams {

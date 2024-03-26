@@ -163,13 +163,44 @@ struct PRRSketchSet {
     return sketches.size();
   }
 
-  auto sketch_sizes() const {
+  auto sketch_n_vertices() const {
     return sketches | TRANSFORM_VIEW(graph::num_vertices(_1.mapped_graph));
   }
 
-  auto average_sketch_size() const -> double {
+  auto sketch_n_edges() const {
+    return sketches | TRANSFORM_VIEW(_1.mapped_graph.num_edges());
+  }
+
+  auto sketch_size_bytes() const {
+    constexpr auto to_estimated_size_bytes = [&](const PRRSketch& sketch) {
+      auto res = sizeof(sketch.center) + sizeof(sketch.mapped_center);
+      res += sketch.vertices.capacity() * sizeof(vertex_id_t);
+      res += sketch.critical_vertices.capacity() * sizeof(vertex_id_t);
+      // 2 : mapped + inv-mapped
+      auto [n, m] = graph_n_m(sketch.mapped_graph);
+      res += 2 * (sizeof(vertex_id_t) * n + (sizeof(vertex_id_t) + sizeof(PRRSketchEdgeState)) * m);
+      return res;
+    };
+    return sketches | views::transform(to_estimated_size_bytes);
+  }
+
+  auto sketch_total_size_bytes() const -> size_t {
+    return accumulate_sum(sketch_size_bytes());
+  }
+
+  auto average_sketch_n_vertices() const {
     BOOST_ASSERT_MSG(!sketches.empty(), "Requires at least 1 PRR-sketch to exist on calculating average size.");
-    return 1.0 * accumulate_sum(sketch_sizes()) / sketches.size();
+    return 1.0 * accumulate_sum(sketch_n_vertices()) / sketches.size();
+  }
+
+  auto average_sketch_n_edges() const {
+    BOOST_ASSERT_MSG(!sketches.empty(), "Requires at least 1 PRR-sketch to exist on calculating average size.");
+    return 1.0 * accumulate_sum(sketch_n_edges()) / sketches.size();
+  }
+
+  auto average_sketch_size_bytes() const -> double {
+    BOOST_ASSERT_MSG(!sketches.empty(), "Requires at least 1 PRR-sketch to exist on calculating average size.");
+    return 1.0 * sketch_total_size_bytes() / sketches.size();
   }
 
   auto success_rate() const -> double {

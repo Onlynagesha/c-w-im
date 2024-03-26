@@ -24,8 +24,8 @@ struct SCCTarjanContext {
 };
 
 template <class... Attributes>
-inline auto n_strongly_connected_components_dfs(SCCTarjanContext& ctx, const AdjacencyList<Attributes...>& graph,
-                                                vertex_id_t v) -> void {
+inline auto n_strongly_connected_components_dfs( //
+    SCCTarjanContext& ctx, const AdjacencyList<Attributes...>& graph, vertex_id_t v) -> void {
   ctx.dfs_timestamp[v] = ctx.low[v] = ctx.next_timestamp++;
   ctx.in_stack.set(v);
   ctx.stack.push(v);
@@ -66,10 +66,16 @@ inline auto n_strongly_connected_components(const AdjacencyList<Attributes...>& 
 
 template <class... Attributes>
 inline auto n_weakly_connected_components(const AdjacencyList<Attributes...>& graph,
-                                          const InvAdjacencyList<Attributes...>& inv_graph) {
+                                          const InvAdjacencyList<Attributes...>& inv_graph,
+                                          std::span<const vertex_id_t> skipped_list = {}) -> vertex_id_t {
   auto n = graph::num_vertices(graph);
   auto visited = DynamicBitset(n);
   auto queue = std::queue<vertex_id_t>{};
+
+  for (auto v : skipped_list) {
+    BOOST_ASSERT_MSG(v < n, "v is out of range [0, n).");
+    visited.set(v); // Skips
+  }
 
   auto push_to_queue = [&](vertex_id_t v) {
     queue.push(v);

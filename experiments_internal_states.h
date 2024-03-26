@@ -52,15 +52,21 @@ struct WIMSketchingGetSeedsResult {
 struct WBIMSketchingInfo {
   size_t n_sketches;
   VertexList selected_boosted;
+  VertexList selected_boosted_by_critical;
 
-  double average_sketch_size;
+  double average_sketch_n_vertices;
+  double average_sketch_n_edges;
+  size_t total_sketch_size_bytes;
   double sketching_success_rate;
+
   double sketching_total_time_usage;
   double boosted_selecting_time_usage;
+  double boosted_selecting_time_usage_by_critical;
 };
 
 struct WBIMSketchingGetBoostedResult {
   VertexListList selected_boosted;
+  VertexListList selected_boosted_by_critical;
   std::vector<WBIMSketchingInfo> sketching_info;
 };
 

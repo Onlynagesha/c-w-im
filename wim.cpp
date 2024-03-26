@@ -45,7 +45,7 @@ auto greedy_max_cover(const SetRange& sets, const InvSetRange& inv_sets, vertex_
     }
   }
   auto cover_percentage = 100.0 * covered.count() / n_sets;
-  MYLOG_FMT_DEBUG("Done greedy-selecting {} elements. {:.3f}% of sets covered.", k, cover_percentage);
+  ELOGFMT(INFO, "Done greedy-selecting {} elements. {:.3f}% of sets covered.", k, cover_percentage);
   return res;
 }
 

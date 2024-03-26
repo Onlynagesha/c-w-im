@@ -42,6 +42,17 @@ struct WBIMSketchingParams {
   std::vector<vertex_id_t> n_boosted;
 };
 
+struct WBIMSeedGeneratingParams {
+  rfl::Rename<"n_seeds_to_generate", rfl::Validator<vertex_id_t, rfl::Minimum<1>>> //
+      n_seeds = 10;
+  rfl::Rename<"seed_candidate_ratio", rfl::Validator<double, rfl::ExclusiveMinimum<0>, rfl::Maximum<1>>> //
+      candidate_ratio = 0.1;
+  rfl::Validator<vertex_id_t, rfl::Minimum<1>> //
+      max_n_wcc_without_seeds = 1;
+  rfl::Rename<"seed_generation_max_try_count", rfl::Validator<uint64_t, rfl::Minimum<1>>> //
+      max_try_count = 10'000;
+};
+
 struct WIMSketchingExperimentParams {
   rfl::Flatten<CommonExperimentParams> common;
   rfl::Flatten<WIMSketchingParams> sketching;
@@ -52,7 +63,7 @@ struct WIMSketchingExperimentParams {
 struct WBIMSketchingExperimentParams {
   rfl::Flatten<CommonExperimentParams> common;
   rfl::Flatten<WBIMSketchingParams> sketching;
-  rfl::Validator<vertex_id_t, rfl::Minimum<1>> n_seeds_to_generate = 10;
+  rfl::Flatten<WBIMSeedGeneratingParams> seed_generating;
 
   static auto parse_from_args(int argc, char** argv) noexcept -> rfl::Result<WBIMSketchingExperimentParams>;
 };
@@ -71,6 +82,7 @@ struct WIMCoarseningExperimentParams {
   rfl::Flatten<CommonExperimentParams> common;
   rfl::Flatten<WIMSketchingParams> sketching;
   rfl::Flatten<MultiLevelParams> multi_level;
+  bool skips_first_level = false;
 
   static auto parse_from_args(int argc, char** argv) noexcept -> rfl::Result<WIMCoarseningExperimentParams>;
 };
@@ -79,7 +91,8 @@ struct WBIMCoarseningExperimentParams {
   rfl::Flatten<CommonExperimentParams> common;
   rfl::Flatten<WBIMSketchingParams> sketching;
   rfl::Flatten<MultiLevelParams> multi_level;
-  rfl::Validator<vertex_id_t, rfl::Minimum<1>> n_seeds_to_generate = 10;
+  rfl::Flatten<WBIMSeedGeneratingParams> seed_generating;
+  bool skips_first_level = false;
 
   static auto parse_from_args(int argc, char** argv) noexcept -> rfl::Result<WBIMCoarseningExperimentParams>;
 };
