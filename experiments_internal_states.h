@@ -27,7 +27,7 @@ template <class T>
   requires(requires(const T& obj) {
     { to_json(obj) } -> std::same_as<json>;
   })
-auto to_json(const std::vector<T>& vector) -> json {
+inline auto to_json(const std::vector<T>& vector) -> json {
   auto res = json{};
   for (const auto& obj : vector) {
     res.push_back(to_json(obj));

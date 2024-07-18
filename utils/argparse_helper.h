@@ -1,7 +1,7 @@
 #pragma once
 
 // HINT: It's recommended to include this "heavy" header
-// (which involves huge amount of metaprogramming operations)
+// (which involves huge amount of metaprogramming computations)
 // into some specific source file instead of using it as header-only
 // to reduce compilation overhead.
 

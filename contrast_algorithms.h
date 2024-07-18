@@ -65,7 +65,7 @@ inline auto max_out_strength(const graph::adjacency<IsInv, E>& graph, vertex_id_
 
 struct PagerankParams {
   using DampingFactor = rfl::Validator<edge_probability_t, rfl::Minimum<0>, rfl::Maximum<1>>;
-  DampingFactor damping_factor = 0.85;
+  DampingFactor damping_factor = 0.85_ep;
 
   using Epsilon = rfl::Validator<edge_probability_t, rfl::Minimum<0>>;
   Epsilon epsilon = 1e-6_ep;
@@ -198,3 +198,10 @@ inline auto imrank(const InvAdjacencyList<E>& inv_graph, const IMRankParams& par
     static_assert(rfl::always_false_v<E>, "Invalid edge type.");
   }
 }
+
+struct RRobustSCCParams {
+  uint64_t r;
+};
+
+auto wim_r_robust_scc(const AdjacencyList<WIMEdge>& graph, const InvAdjacencyList<WIMEdge>& inv_graph,
+                      const RRobustSCCParams& params) -> rfl::Result<std::vector<vertex_id_t>>;

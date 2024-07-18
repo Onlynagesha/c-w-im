@@ -1,9 +1,9 @@
-#include "main_create_dataset_common.h"
+#include "exec/datasets/create_dataset_common.h"
 
 int main(int argc, char** argv) {
-  return main_worker<WIMEdge>(argc, argv)
+  return main_worker<WBIMEdge>(argc, argv)
       .and_then([](auto) {
-        ELOG_INFO << "Done creating WIM dataset.";
+        ELOG_INFO << "Done creating WBIM dataset.";
         return rfl::Result{0};
       })
       .or_else([](const rfl::Error& error) {
