@@ -35,12 +35,19 @@ struct SCCTarjanContext {
   std::vector<vertex_id_t> dfs_timestamp;
   // See documentation of Tarjan algorithm.
   std::vector<vertex_id_t> low;
+  // component_index[v] = Which component the vertex v is in.
+  std::vector<vertex_id_t> component_index;
 
-  explicit SCCTarjanContext(vertex_id_t n)
-      : n(n), result(0), next_timestamp(0), in_trace_stack(n), dfs_timestamp(n, NULL_INDEX), low(n, NULL_INDEX) {}
+  explicit SCCTarjanContext(vertex_id_t n, bool counts_only = true)
+      : n(n), result(0), next_timestamp(0), in_trace_stack(n), dfs_timestamp(n, NULL_INDEX), low(n, NULL_INDEX) {
+    if (!counts_only) {
+      component_index.assign(n, NULL_INDEX);
+    }
+  }
 };
 
-template <class... Attributes>
+// Unused
+template <bool CountsOnly = true, class... Attributes>
 inline auto n_strongly_connected_components_dfs( //
     SCCTarjanContext& ctx, const AdjacencyList<Attributes...>& graph, vertex_id_t v) -> void {
   // (a) v is visited for the first time.
@@ -61,28 +68,33 @@ inline auto n_strongly_connected_components_dfs( //
   }
   // (c) Counts for each DFS root
   if (ctx.low[v] == ctx.dfs_timestamp[v]) {
-    ctx.result += 1;
     while (true) {
       BOOST_ASSERT(!ctx.stack.empty());
       auto top = ctx.trace_stack.top();
       ctx.trace_stack.pop();
       ctx.in_trace_stack.reset(top);
+      if constexpr (!CountsOnly) {
+        ctx.component_index[top] = ctx.result;
+      }
       if (top == v) {
         break;
       }
     }
+    ctx.result += 1;
   }
   // (d) Returns
 }
 
-template <class... Attributes>
-inline auto n_strongly_connected_components_dfs_non_recursive( //
-    SCCTarjanContext& ctx, const AdjacencyList<Attributes...>& graph, vertex_id_t v) -> void {
+template <bool CountsOnly = true, class... Attributes,
+          invocable_r_or_nullptr<bool, vertex_id_t, vertex_id_t, const Attributes&...> EdgeFilterFn>
+inline auto n_strongly_connected_components_dfs_non_recursive(                       //
+    SCCTarjanContext& ctx, const AdjacencyList<Attributes...>& graph, vertex_id_t v, //
+    const EdgeFilterFn& edge_filter_fn) -> void {
   ctx.dfs_stack.emplace(v);
   while (!ctx.dfs_stack.empty()) {
   n_strongly_connected_components_dfs_non_recursive_head:
     auto& [v, index] = ctx.dfs_stack.top();
-    auto adj_list_v = graph[v] | views::keys;
+    auto adj_list_v = ranges::subrange{graph[v].begin(), graph[v].end()};
     auto adj_list_size = ranges::size(adj_list_v);
 
     if (index == SCCTarjanContext::NULL_INDEX) {
@@ -92,11 +104,18 @@ inline auto n_strongly_connected_components_dfs_non_recursive( //
       ctx.trace_stack.push(v);
     } else {
       // (b.2) See above
-      auto u = adj_list_v[index];
+      auto u = get<0>(adj_list_v[index]);
       ctx.low[v] = std::min(ctx.low[v], ctx.low[u]);
     }
     while ((++index) < adj_list_size) {
-      auto u = adj_list_v[index];
+      // Extra: edge filter (each edge will be checked only once.)
+      if constexpr (!std::is_null_pointer_v<EdgeFilterFn>) {
+        auto args = std::tuple_cat(std::tuple{v}, adj_list_v[index]);
+        if (!std::apply(edge_filter_fn, args)) {
+          continue;
+        }
+      }
+      auto u = get<0>(adj_list_v[index]);
       if (ctx.dfs_timestamp[u] == SCCTarjanContext::NULL_INDEX) {
         // (b.1) implemented in a non-recursive manner
         ctx.dfs_stack.emplace(u);
@@ -108,16 +127,19 @@ inline auto n_strongly_connected_components_dfs_non_recursive( //
     }
     // (c) Counts for each DFS root
     if (ctx.low[v] == ctx.dfs_timestamp[v]) {
-      ctx.result += 1;
       while (true) {
         BOOST_ASSERT(!ctx.trace_stack.empty());
         auto top = ctx.trace_stack.top();
         ctx.trace_stack.pop();
         ctx.in_trace_stack.reset(top);
+        if constexpr (!CountsOnly) {
+          ctx.component_index[top] = ctx.result;
+        }
         if (top == v) {
           break;
         }
       }
+      ctx.result += 1;
     }
     // (d) Returns
     BOOST_ASSERT(!ctx.dfs_stack.empty() && ctx.dfs_stack.top().v == v);
@@ -126,15 +148,41 @@ inline auto n_strongly_connected_components_dfs_non_recursive( //
 }
 } // namespace details
 
-template <class... Attributes>
-inline auto n_strongly_connected_components(const AdjacencyList<Attributes...>& graph) {
+template <class... Attributes,
+          invocable_r_or_nullptr<bool, vertex_id_t, vertex_id_t, const Attributes&...> EdgeFilterFn = std::nullptr_t>
+inline auto n_strongly_connected_components( //
+    const AdjacencyList<Attributes...>& graph, EdgeFilterFn&& edge_filter_fn = nullptr) -> vertex_id_t {
   auto ctx = details::SCCTarjanContext(graph::num_vertices(graph));
   for (auto v : vertices(graph)) {
     if (ctx.dfs_timestamp[v] == details::SCCTarjanContext::NULL_INDEX) {
-      details::n_strongly_connected_components_dfs_non_recursive(ctx, graph, v);
+      // true: counts only
+      details::n_strongly_connected_components_dfs_non_recursive<true>(ctx, graph, v, edge_filter_fn);
     }
   }
   return ctx.result;
+}
+
+struct SCCResultType {
+  vertex_id_t n_sccs;
+  std::vector<vertex_id_t> component_index;
+};
+
+template <class... Attributes,
+          invocable_r_or_nullptr<bool, vertex_id_t, vertex_id_t, const Attributes&...> EdgeFilterFn = std::nullptr_t>
+inline auto strongly_connected_components( //
+    const AdjacencyList<Attributes...>& graph, EdgeFilterFn&& edge_filter_fn = nullptr) -> SCCResultType {
+  // false: Not counting only. gets component_index[] as well as counting SCCs
+  auto ctx = details::SCCTarjanContext(graph::num_vertices(graph), false);
+  for (auto v : vertices(graph)) {
+    if (ctx.dfs_timestamp[v] == details::SCCTarjanContext::NULL_INDEX) {
+      // false: gets component_index[] as well as counting SCCs
+      details::n_strongly_connected_components_dfs_non_recursive<false>(ctx, graph, v, edge_filter_fn);
+    }
+  }
+  return SCCResultType{
+      .n_sccs = ctx.result,
+      .component_index = std::move(ctx.component_index),
+  };
 }
 
 template <class... Attributes>

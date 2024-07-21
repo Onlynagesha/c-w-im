@@ -142,7 +142,7 @@ inline auto merge_dumped_components(ComponentRange&& components, int indent, int
 
 template <class Property, int IsInv>
   requires(fmt::is_formattable<Property>::value)
-inline auto dump_graph(const graph::adjacency<IsInv, Property>& graph, int indent, int level) -> std::string {
+inline auto dump_graph(const graph::adjacency<IsInv, Property>& graph, int indent, int level = 0) -> std::string {
   auto components = make_reserved_vector<std::string>(graph.num_edges());
   for (auto u : vertices(graph)) {
     for (auto [v, w] : graph[u]) {

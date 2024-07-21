@@ -123,12 +123,28 @@ struct WBIMExpansionInfo {
 
 struct WIMExpansionResult {
   VertexListList expanded_seeds;
-  std::vector<WIMExpansionInfo> info_items;
+  std::vector<double> time_usage;
+
+  auto info_item(size_t index) const -> WIMExpansionInfo {
+    BOOST_ASSERT(index < expanded_seeds.size() && index < time_usage.size());
+    return WIMExpansionInfo{
+        .expanded_seeds = expanded_seeds[index],
+        .time_usage = time_usage[index],
+    };
+  }
 };
 
 struct WBIMExpansionResult {
   VertexListList expanded_boosted;
-  std::vector<WBIMExpansionInfo> info_items;
+  std::vector<double> time_usage;
+
+  auto info_item(size_t index) const -> WBIMExpansionInfo {
+    BOOST_ASSERT(index < expanded_boosted.size() && index < time_usage.size());
+    return WBIMExpansionInfo{
+        .expanded_boosted = expanded_boosted[index],
+        .time_usage = time_usage[index],
+    };
+  }
 };
 
 template <is_edge_property E>

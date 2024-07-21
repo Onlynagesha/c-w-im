@@ -1,5 +1,6 @@
 #include "contrast_algorithms.h"
 #include "utils/easylog.h"
+#include <fmt/ranges.h>
 
 namespace {
 template <is_edge_property E>

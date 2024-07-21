@@ -120,6 +120,12 @@ concept member_object_pointer_from_to =
     std::is_same_v<typename details::MemberObjectPointerHelper<T>::class_type, ClassType> &&
     std::is_same_v<typename details::MemberObjectPointerHelper<T>::member_type, MemberType>;
 
+template <class T>
+using class_type_of_pointer_to_member = typename details::MemberObjectPointerHelper<T>::class_type;
+
+template <class T>
+using member_type_of_pointer_to_member = typename details::MemberObjectPointerHelper<T>::member_type;
+
 #define UTILS_RANGE_CATEGORIES(F) \
   F(input)                        \
   F(forward)                      \

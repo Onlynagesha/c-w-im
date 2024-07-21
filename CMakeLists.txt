@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_FLAGS -fconstexpr-depth=4096)
 
 find_package(argparse CONFIG REQUIRED)
-find_package(Boost COMPONENTS unit_test_framework REQUIRED) # Boost.assert
+find_package(Boost CONFIG COMPONENTS unit_test_framework REQUIRED) # Boost.assert
 find_package(fmt CONFIG REQUIRED)
 find_package(magic_enum CONFIG REQUIRED)
 find_package(nameof CONFIG REQUIRED)
@@ -52,35 +52,26 @@ endif ()
 
 # ---- Components ----
 
-set(COMPONENT_OBJECTS
-    yyjson-components
-    io-components
-    experiment-components
-    contrast-components)
-
-add_library(yyjson-components OBJECT
-    third_party/reflect_cpp/src/yyjson.c)
-
-add_library(io-components OBJECT
-    argparse.cpp # Requires yyjson components
-    dump.cpp
-    graph_types.cpp)
-target_link_libraries(io-components PRIVATE yyjson-components)
-
-add_library(experiment-components OBJECT 
-    experiments.cpp 
-    experiments_internal_states.cpp # Requires yyjson components
-    coarsening.cpp
+add_library(dump-components SHARED
+    third_party/reflect_cpp/src/yyjson.c
+    argparse.cpp
     coarsening_dump.cpp
-    wim.cpp
+    dump.cpp
     wim_dump.cpp)
-target_link_libraries(experiment-components PRIVATE yyjson-components)
 
-add_library(contrast-components OBJECT
+set(CONTRAST_SOURCE_FILES
     contrast/imrank.cpp
     contrast/max_degree.cpp
     contrast/pagerank.cpp
-    contrast/r_robust_scc.cpp)
+    contrast/r_robust_scc.cpp
+    wim.cpp) # Required by r-Robust SCC algorithm
+
+set(EXPERIMENT_COMMON_SOURCE_FILES
+    graph_types.cpp # For graph IO
+    experiments/internal_states.cpp
+    experiments/components.cpp
+    coarsening.cpp # Requires by experiments/components.cpp
+    contrast/max_degree.cpp) # Required by generate_wbim_seeds in experiments/components.cpp
 
 # ---- Experiment Executables ----
 
@@ -92,23 +83,45 @@ set(EXPERIMENT_EXECUTABLES
     wim-contrast-experiment)
 
 add_executable(wim-experiment
-    exec/experiments/wim_experiment.cpp)
+    exec/experiments/wim_experiment.cpp
+    ${EXPERIMENT_COMMON_SOURCE_FILES}
+    experiments/impl/wim.cpp
+    wim.cpp
+    )
 
 add_executable(wbim-experiment
-    exec/experiments/wbim_experiment.cpp)
+    exec/experiments/wbim_experiment.cpp
+    ${EXPERIMENT_COMMON_SOURCE_FILES}
+    experiments/impl/wim.cpp
+    wim.cpp)
 
 add_executable(wim-coarsening-experiment
-    exec/experiments/wim_coarsening_experiment.cpp)
+    exec/experiments/wim_coarsening_experiment.cpp
+    ${EXPERIMENT_COMMON_SOURCE_FILES}
+    experiments/impl/wim.cpp
+    experiments/impl/wim_coarsening.cpp
+    coarsening.cpp
+    wim.cpp)
 
 add_executable(wbim-coarsening-experiment
-    exec/experiments/wbim_coarsening_experiment.cpp)
+    exec/experiments/wbim_coarsening_experiment.cpp
+    ${EXPERIMENT_COMMON_SOURCE_FILES}
+    experiments/impl/wim.cpp
+    experiments/impl/wim_coarsening.cpp
+    coarsening.cpp
+    wim.cpp)
 
 add_executable(wim-contrast-experiment
-    exec/experiments/wim_contrast_experiment.cpp)
-target_link_libraries(wim-contrast-experiment PRIVATE contrast-components)
+    exec/experiments/wim_contrast_experiment.cpp
+    ${EXPERIMENT_COMMON_SOURCE_FILES}
+    ${CONTRAST_SOURCE_FILES}
+    experiments/impl/wim.cpp
+    experiments/impl/wim_coarsening.cpp
+    experiments/impl/contrast.cpp
+    coarsening.cpp)
 
 foreach (target ${EXPERIMENT_EXECUTABLES})
-    target_link_libraries(${target} PRIVATE yyjson-components io-components experiment-components)
+    target_link_libraries(${target} PRIVATE dump-components)
 endforeach()
 
 # ---- Dataset IO Executables ----
@@ -120,18 +133,21 @@ set(DATASET_IO_EXECUTABLES
 
 add_executable(create-wim-dataset
     exec/datasets/create_wim_dataset.cpp
-    create_dataset.cpp)
+    create_dataset.cpp
+    graph_types.cpp)
 
 add_executable(create-wbim-dataset
     exec/datasets/create_wbim_dataset.cpp
-    create_dataset.cpp)
+    create_dataset.cpp
+    graph_types.cpp)
 
 add_executable(to-matrix-market
     exec/datasets/to_matrix_market.cpp
-    to_matrix_market.cpp)
+    to_matrix_market.cpp
+    graph_types.cpp)
 
 foreach (target ${DATASET_IO_EXECUTABLES})
-    target_link_libraries(${target} PRIVATE yyjson-components io-components)
+    target_link_libraries(${target} PRIVATE dump-components)
 endforeach()
 
 # ---- Tests ----
@@ -141,31 +157,35 @@ set(TEST_CASE_EXECUTABLES
     test-imrank
     test-max-degree
     test-pagerank
+    test-radix-sort
     test-wbim-activation-probability)
 
 add_executable(test-graph-connectivity
     tests/graph_connectivity.cpp)
 
 add_executable(test-imrank
-    tests/imrank.cpp)
+    tests/imrank.cpp
+    contrast/max_degree.cpp # Required by contrast/imrank.cpp
+    contrast/imrank.cpp)
 
 add_executable(test-max-degree
-    tests/max_degree.cpp)
+    tests/max_degree.cpp
+    contrast/max_degree.cpp)
 
 add_executable(test-pagerank
-    tests/pagerank.cpp)
+    tests/pagerank.cpp
+    contrast/pagerank.cpp)
+
+add_executable(test-radix-sort
+    tests/radix_sort.cpp)
 
 add_executable(test-wbim-activation-probability
-    tests/wbim_activation_probability.cpp)
-target_link_libraries(test-wbim-activation-probability PRIVATE 
-    yyjson-components io-components experiment-components contrast-components)
-
-foreach (target test-imrank test-max-degree test-pagerank)
-    target_link_libraries(${target} PRIVATE contrast-components)
-endforeach()
+    tests/wbim_activation_probability.cpp
+    wim.cpp)
+target_link_libraries(test-wbim-activation-probability PRIVATE dump-components)
 
 foreach (target ${TEST_CASE_EXECUTABLES})
-    target_link_libraries(${target} PRIVATE ${Boost_UNIT_TEST_FRAMEWORK_LIBRARY})
+    target_link_libraries(${target} PRIVATE Boost::unit_test_framework)
     target_compile_definitions(${target} PRIVATE ENABLES_MYLOG_TRACE)
 endforeach()
 
@@ -177,21 +197,26 @@ set(PLAYGROUND_TESTS
     test-prr-sketching)
 
 add_executable(test-wim-coarsening
-    playground/test_wim_coarsening.cpp)
+    playground/test_wim_coarsening.cpp
+    coarsening.cpp
+    wim.cpp)
 
 add_executable(test-wbim-coarsening
-    playground/test_wbim_coarsening.cpp)
+    playground/test_wbim_coarsening.cpp
+    coarsening.cpp
+    wim.cpp)
 
 add_executable(test-prr-sketching
-    playground/test_prr_sketching.cpp)
+    playground/test_prr_sketching.cpp
+    wim.cpp)
 
 foreach (target ${PLAYGROUND_TESTS})
-    target_link_libraries(${target} PRIVATE yyjson-components io-components experiment-components)
+    target_link_libraries(${target} PRIVATE dump-components)
 endforeach()
 
 # ---- Common ----
 
-foreach(target ${COMPONENT_OBJECTS}
+foreach(target dump-components
                ${EXPERIMENT_EXECUTABLES}
                ${DATASET_IO_EXECUTABLES}
                ${TEST_CASE_EXECUTABLES}

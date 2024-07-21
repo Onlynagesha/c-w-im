@@ -103,6 +103,7 @@ struct WIMContrastExperimentParams {
   bool with_imrank = false;
   bool with_pagerank = false;
   bool with_rr_sketch = false;
+  bool with_r_robust_scc = false;
 
   rfl::Flatten<CommonExperimentParams> common;
   std::vector<vertex_id_t> n_seeds;
@@ -118,6 +119,8 @@ struct WIMContrastExperimentParams {
   // For IMRank only
   uint64_t imrank_n_iterations = 100;
   rfl::Validator<uint64_t, rfl::Minimum<1>> imrank_n_iterations_before_topk_fixed = 3;
+  // For r-Robust SCC only
+  uint64_t r_robust_scc_r = 16;
 
   static auto parse_from_args(int argc, char** argv) noexcept -> rfl::Result<WIMContrastExperimentParams>;
 };

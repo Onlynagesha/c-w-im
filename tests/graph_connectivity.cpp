@@ -1,9 +1,6 @@
 #define BOOST_TEST_MODULE Graph Connectivity
 #define BOOST_TEST_DYN_LINK
 
-#define BOOST_TEST_NO_MAIN
-#define BOOST_TEST_ALTERNATIVE_INIT_API
-
 #include "graph_connectivity.h"
 #include "tests/sample_graph.h"
 #include "utils/easylog.h"
@@ -18,7 +15,9 @@ BOOST_AUTO_TEST_CASE(graph1) {
   BOOST_CHECK_EQUAL(n_weakly_connected_components(adj_list, inv_adj_list), 1);
   BOOST_CHECK_EQUAL(n_weakly_connected_components(adj_list, inv_adj_list, {1}), 2);
   // SCC
-  BOOST_CHECK_EQUAL(n_strongly_connected_components(adj_list), 4);
+  auto [n_sccs, component_index] = strongly_connected_components(adj_list);
+  std::cout << dump_array("SCC component_index[] of graph1", component_index) << std::endl;
+  BOOST_CHECK_EQUAL(n_sccs, 4);
 }
 
 BOOST_AUTO_TEST_CASE(graph2) {
@@ -28,7 +27,13 @@ BOOST_AUTO_TEST_CASE(graph2) {
   BOOST_CHECK_EQUAL(n_weakly_connected_components(adj_list, inv_adj_list), 1);
   BOOST_CHECK_EQUAL(n_weakly_connected_components(adj_list, inv_adj_list, {3}), 1);
   // SCC
-  BOOST_CHECK_EQUAL(n_strongly_connected_components(adj_list), 2);
+  auto [n_sccs, component_index] = strongly_connected_components(adj_list);
+  std::cout << dump_array("SCC component_index[] of graph2", component_index) << std::endl;
+  BOOST_CHECK_EQUAL(n_sccs, 2);
+  auto filter_fn_2_1 = [](vertex_id_t u, vertex_id_t v) {
+    return u < v; // Filters out the directed edge (3, 1)
+  };
+  BOOST_CHECK_EQUAL(n_strongly_connected_components(adj_list, filter_fn_2_1), 4);
 }
 
 BOOST_AUTO_TEST_CASE(graph3) {
@@ -39,7 +44,13 @@ BOOST_AUTO_TEST_CASE(graph3) {
   BOOST_CHECK_EQUAL(n_weakly_connected_components(adj_list, inv_adj_list, {1}), 1);
   BOOST_CHECK_EQUAL(n_weakly_connected_components(adj_list, inv_adj_list, {1, 3}), 2);
   // SCC
-  BOOST_CHECK_EQUAL(n_strongly_connected_components(adj_list), 3);
+  auto [n_sccs, component_index] = strongly_connected_components(adj_list);
+  std::cout << dump_array("SCC component_index[] of graph3", component_index) << std::endl;
+  BOOST_CHECK_EQUAL(n_sccs, 3);
+  auto filter_fn_3_1 = [](vertex_id_t u, vertex_id_t v) {
+    return u != 3; // Filters out (3, 1) and (3, 2)
+  };
+  BOOST_CHECK_EQUAL(n_strongly_connected_components(adj_list, filter_fn_3_1), 5);
 }
 
 BOOST_AUTO_TEST_CASE(graph4) {
@@ -49,7 +60,13 @@ BOOST_AUTO_TEST_CASE(graph4) {
   BOOST_CHECK_EQUAL(n_weakly_connected_components(adj_list, inv_adj_list), 1);
   BOOST_CHECK_EQUAL(n_weakly_connected_components(adj_list, inv_adj_list, {1}), 2);
   // SCC
-  BOOST_CHECK_EQUAL(n_strongly_connected_components(adj_list), 1);
+  auto [n_sccs, component_index] = strongly_connected_components(adj_list);
+  std::cout << dump_array("SCC component_index[] of graph4", component_index) << std::endl;
+  BOOST_CHECK_EQUAL(n_sccs, 1);
+  auto filter_fn_4_1 = [](vertex_id_t u, vertex_id_t v) {
+    return u != 3 || v != 0; // Filters out (3, 0)
+  };
+  BOOST_CHECK_EQUAL(n_strongly_connected_components(adj_list, filter_fn_4_1), 2);
 }
 
 BOOST_AUTO_TEST_CASE(graph5) {
@@ -60,10 +77,12 @@ BOOST_AUTO_TEST_CASE(graph5) {
   BOOST_CHECK_EQUAL(n_weakly_connected_components(adj_list, inv_adj_list, {2}), 3);
   BOOST_CHECK_EQUAL(n_weakly_connected_components(adj_list, inv_adj_list, {1, 5}), 3);
   // SCC
-  BOOST_CHECK_EQUAL(n_strongly_connected_components(adj_list), 3);
-}
-
-int main(int argc, char* argv[], char* envp[]) {
-  easylog::set_min_severity(easylog::Severity::TRACE);
-  return boost::unit_test::unit_test_main(init_unit_test, argc, argv);
+  auto [n_sccs, component_index] = strongly_connected_components(adj_list);
+  std::cout << dump_array("SCC component_index[] of graph5", component_index) << std::endl;
+  BOOST_CHECK_EQUAL(n_sccs, 3);
+  auto filter_fn_5_1 = [](vertex_id_t u, vertex_id_t v) {
+    std::tie(u, v) = std::minmax(u, v);
+    return u != 1 || v != 3; // Filters out (1, 3) and (3, 1)
+  };
+  BOOST_CHECK_EQUAL(n_strongly_connected_components(adj_list, filter_fn_5_1), 4);
 }

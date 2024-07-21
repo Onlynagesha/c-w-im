@@ -200,8 +200,14 @@ inline auto imrank(const InvAdjacencyList<E>& inv_graph, const IMRankParams& par
 }
 
 struct RRobustSCCParams {
+  vertex_id_t k;
   uint64_t r;
+  uint64_t n_sketches;
 };
 
-auto wim_r_robust_scc(const AdjacencyList<WIMEdge>& graph, const InvAdjacencyList<WIMEdge>& inv_graph,
+auto wim_r_robust_scc(const AdjacencyList<WIMEdge>& graph, std::span<const vertex_weight_t> vertex_weights,
                       const RRobustSCCParams& params) -> rfl::Result<std::vector<vertex_id_t>>;
+
+inline auto wim_r_robust_scc_p(const AdjacencyListPair<WIMEdge>& graph, const RRobustSCCParams& params) {
+  return wim_r_robust_scc(graph.adj_list, graph.vertex_weights, params);
+}

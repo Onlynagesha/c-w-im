@@ -1,6 +1,7 @@
 #include "coarsening.h"
 #include "coarsening_dump.h"
 #include "dump.h"
+#include "radix_sort.h"
 #include "utils/easylog.h"
 #include "wim.h"
 #include <fmt/ranges.h>
@@ -128,35 +129,7 @@ struct VertexPairWithValue {
 
 template <class T>
 auto radix_sort_vertex_pairs(std::span<VertexPairWithValue<T>> vertex_pairs, vertex_id_t n) -> void {
-  auto m = vertex_pairs.size();
-  auto count = std::vector<vertex_id_t>(n);
-  auto temp = std::vector<VertexPairWithValue<T>>(m);
-  MYLOG_FMT_TRACE("vertex_pairs before radix sorting: {}", vertex_pairs | TRANSFORM_VIEW(std::pair{_1.u, _1.v}));
-  // Step 1: Sorts by v, vertex_pairs -> temp
-  for (const auto& item : vertex_pairs) {
-    BOOST_ASSERT_MSG(item.u < n && item.v < n, "v is out of range [0, n).");
-    count[item.v] += 1;
-  }
-  std::exclusive_scan(count.begin(), count.end(), count.begin(), 0);
-  for (const auto& item : vertex_pairs) {
-    temp[count[item.v]] = item;
-    count[item.v] += 1;
-  }
-  MYLOG_FMT_TRACE("vertex_pairs after radix sorting step 1: {}", temp | TRANSFORM_VIEW(std::pair{_1.u, _1.v}));
-  // Step 2: Sorts by u, temp -> vertex_pairs
-  ranges::fill(count, 0);
-  for (const auto& item : temp) {
-    count[item.u] += 1;
-  }
-  std::exclusive_scan(count.begin(), count.end(), count.begin(), 0);
-  for (const auto& item : temp) {
-    vertex_pairs[count[item.u]] = item;
-    count[item.u] += 1;
-  }
-  MYLOG_FMT_TRACE("vertex_pairs after radix sorting step 2: {}", //
-                  vertex_pairs | TRANSFORM_VIEW(std::pair{_1.u, _1.v}));
-  BOOST_ASSERT_MSG(ranges::is_sorted(vertex_pairs | TRANSFORM_VIEW(std::pair{_1.u, _1.v})), //
-                   "Implementation error: Not sorted correctly.");
+  radix_sort_struct<&VertexPairWithValue<T>::u, &VertexPairWithValue<T>::v>(vertex_pairs, 0_vid, n - 1);
 }
 
 template <class Range>

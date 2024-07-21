@@ -1,9 +1,6 @@
 #define BOOST_TEST_MODULE "Pagerank IM Algorithm"
 #define BOOST_TEST_DYN_LINK
 
-#define BOOST_TEST_NO_MAIN
-#define BOOST_TEST_ALTERNATIVE_INIT_API
-
 #include "contrast_algorithms.h"
 #include "tests/sample_graph.h"
 #include "utils/easylog.h"
@@ -52,9 +49,4 @@ BOOST_AUTO_TEST_CASE(graphA) {
   // Expected PR(1): [11.9815, 16.0856, 10.7138, 13.1558, 22.2212, 13.2584, 8.6190, 11.2789, 4.6947, 16.8412]
   const auto ans_transpose_weighted = std::vector<vertex_id_t>{9, 4, 1, 0, 3, 2, 5, 7, 6, 8};
   BOOST_CHECK_EQUAL_RANGE(do_max_pagerank({.transpose = true, .weighted = true}), AnsILWrapper{ans_transpose_weighted});
-}
-
-int main(int argc, char* argv[], char* envp[]) {
-  easylog::set_min_severity(easylog::Severity::TRACE);
-  return boost::unit_test::unit_test_main(init_unit_test, argc, argv);
 }

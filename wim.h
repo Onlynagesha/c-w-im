@@ -172,7 +172,7 @@ struct PRRSketchSet {
   }
 
   auto sketch_size_bytes() const {
-    constexpr auto to_estimated_size_bytes = [&](const PRRSketch& sketch) {
+    constexpr auto to_estimated_size_bytes = [&](const PRRSketch& sketch) -> size_t {
       auto res = sizeof(sketch.center) + sizeof(sketch.mapped_center);
       res += sketch.vertices.capacity() * sizeof(vertex_id_t);
       res += sketch.critical_vertices.capacity() * sizeof(vertex_id_t);
