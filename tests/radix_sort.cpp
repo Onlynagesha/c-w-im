@@ -1,5 +1,4 @@
 #define BOOST_TEST_MODULE "Radix sort"
-#define BOOST_TEST_DYN_LINK
 
 #include "radix_sort.h"
 #include <boost/test/unit_test.hpp>

@@ -1,11 +1,6 @@
 #define BOOST_TEST_MODULE "Activation Probability in WBIM Algorithm"
-#define BOOST_TEST_DYN_LINK
-
-#define BOOST_TEST_NO_MAIN
-#define BOOST_TEST_ALTERNATIVE_INIT_API
 
 #include "tests/sample_graph.h"
-#include "utils/easylog.h"
 #include "wim.h"
 #include <boost/test/unit_test.hpp>
 #include <fmt/ranges.h>
@@ -63,9 +58,4 @@ BOOST_AUTO_TEST_CASE(graphC) {
     };
     BOOST_CHECK_EQUAL(CHECK_FLOATING_POINT_RANGE(seed_prob_boosted, ans_boosted), "");
   }
-}
-
-int main(int argc, char* argv[], char* envp[]) {
-  easylog::set_min_severity(easylog::Severity::TRACE);
-  return boost::unit_test::unit_test_main(init_unit_test, argc, argv);
 }

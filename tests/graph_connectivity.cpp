@@ -1,5 +1,4 @@
 #define BOOST_TEST_MODULE Graph Connectivity
-#define BOOST_TEST_DYN_LINK
 
 #include "graph_connectivity.h"
 #include "tests/sample_graph.h"

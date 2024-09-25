@@ -564,8 +564,13 @@ auto merge_coarsened_wbim_edge_p(WBIMCoarsenedEdgeDetails& dest, const WBIMCoars
   dest.merged.p = get_merged_p(dest.p_cross, gu.p_internal, heuristics, gu.n_members(), gv.n_members(), params);
 }
 
+// Must be called after merge_coarsened_wim_edge_p
 auto merge_coarsened_wim_edge_p_seed(WIMCoarsenedEdgeDetails& dest, const WIMCoarsenedVertexDetails& gu,
                                      const WIMCoarsenedVertexDetails& gv, const CoarseningParams& params) -> void {
+  if (params.seed_edge_weight_rule == SeedEdgeWeightRule::IGNORED) {
+    dest.merged.p_seed = dest.merged.p;
+    return;
+  }
   auto N = gu.n_members();
   // Special case: Gu has only 1 member {u}
   if (N == 1) {

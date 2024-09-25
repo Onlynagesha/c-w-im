@@ -12,7 +12,7 @@ enum class NeighborMatchRule { HEM_P_MAX, HEM_P_PRODUCT, LEM_P_MAX, LEM_P_PRODUC
 
 enum class EdgeWeightRule { SEPARATE_SIMPLE, MERGED_SIMPLE, SEPARATE_PRECISE, MERGED_PRECISE };
 
-enum class SeedEdgeWeightRule { AVERAGE, MAX, BEST_SEED_INDEX };
+enum class SeedEdgeWeightRule { IGNORED, AVERAGE, MAX, BEST_SEED_INDEX };
 
 enum class BoostedEdgeWeightRule { AVERAGE, MAX, BEST_BOOSTED_INDEX, ALL };
 

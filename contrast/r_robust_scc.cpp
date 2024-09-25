@@ -94,6 +94,7 @@ auto wim_r_robust_scc(const AdjacencyList<WIMEdge>& graph, std::span<const verte
       }
     }
   }
+  MYLOG_FMT_DEBUG("coarsened |E| = {}", p_map.size());
   // Step 4: Builds the coarsened graph
   auto [coarsened_adj_list, coarsened_inv_adj_list] = [&]() {
     auto coarsened_edge_list = DirectedEdgeList<WIMEdge>{};
@@ -101,7 +102,7 @@ auto wim_r_robust_scc(const AdjacencyList<WIMEdge>& graph, std::span<const verte
     for (auto [v_pair, one_minus_p] : p_map) {
       auto [u, v] = v_pair;
       auto p = 1.0_ep - one_minus_p;
-      coarsened_edge_list.push_back(u, v, {.p = p, .p_seed = p}); // p_seed is ignored
+      coarsened_edge_list.push_back(u, v, {.p = p, .p_seed = p}); // p_seed is unused
     }
     coarsened_edge_list.close_for_push_back();
     return std::pair{AdjacencyList<WIMEdge>{coarsened_edge_list}, InvAdjacencyList<WIMEdge>{coarsened_edge_list}};

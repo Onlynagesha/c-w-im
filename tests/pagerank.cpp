@@ -1,5 +1,4 @@
 #define BOOST_TEST_MODULE "Pagerank IM Algorithm"
-#define BOOST_TEST_DYN_LINK
 
 #include "contrast_algorithms.h"
 #include "tests/sample_graph.h"
